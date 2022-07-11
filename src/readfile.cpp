@@ -22,6 +22,7 @@ Released under the MIT License
 
 FILE *inf;
 uint64_t filesize;
+uint64_t file_nvals;
 
 bool progressbar_open = false;
 int progressbar_last_percent = 0;
@@ -40,7 +41,7 @@ void progressbar_show(int percent) {
       progressbar_open = true; }
    if (percent != progressbar_last_percent) {
       progressbar_last_percent = percent;
-      //dlog("progress percent %d\n", percent);
+      dlog("progress percent %d\n", percent);
       SendMessage(progressbar_handle, PBM_STEPIT, 0, 0); } }
 
 void progressbar_hide(void) {
@@ -90,28 +91,43 @@ void dump_blocks(void) {
       prev = blk; } }
 
 void show_file_info(void) {
-   dlog("read %llu data and allocated %d blocks\n", plotdata.nvals, plotdata.numblks);
-   char msg[400], nvals[30], numblks[30], filemsg[30], memmsg[30];
+   dlog("stored %llu data points and allocated %d blocks\n", plotdata.nvals, plotdata.numblks);
+   char msg[500], sample_info[100];
+   char nfilevals[30], nplotvals[30], numblks[30], filemsg[30], memmsg[30];
    //dump_blocks();
+   if (plotdata.sampling > 1 && plotdata.source != DATA_FAKE)
+      snprintf(sample_info, sizeof(sample_info), "We stored 1 out of every %d data points, or %s.\n",
+               plotdata.sampling, u64commas(plotdata.nvals, nplotvals));
+   else sample_info[0] = 0;
    snprintf(msg, sizeof(msg),
-            "The %s file has %s points for each of %d plots.\n"
-            "We allocated %s data blocks taking %s in  memory.",
-            format_memsize(filesize, filemsg), u64commas(plotdata.nvals, nvals), plotdata.nseries,
+            "The %s file had %s points for each of %d plots.\n"
+            "%s" // sampling info
+            "We allocated %s data blocks taking %s in virtual memory.\n"
+            "The largest value from time %f to %f is %.3f.\n",
+            format_memsize(filesize, filemsg), u64commas(file_nvals, nfilevals), plotdata.nseries,
+            sample_info,
             u32commas(plotdata.numblks, numblks),
-            format_memsize(plotdata.numblks*(uint64_t)(sizeof(struct datablk_t)+ plotdata.nseries * NDATABLK*sizeof(float)), memmsg));
+            /**/format_memsize(plotdata.numblks*(uint64_t)(sizeof(struct datablk_t)+ plotdata.nseries * NDATABLK*sizeof(float)), memmsg),
+            plotdata.timestart, plotdata.timeend, plotdata.maxval);
    MessageBoxA(NULL, msg, "Info", 0); }
 
 void finish_file(const char *filename) {
    make_block_index();
    clear_markers();
+   plotdata.timestart = (double)plotdata.timestart_ns / 1e9;
+   plotdata.timeend = (double)(plotdata.timestart_ns + plotdata.timedelta_ns*(plotdata.nvals-1)) / 1e9;
    SetWindowText(main_ww.handle, filename); // put the filename on the title of the main window
    HMENU menu;
    menu = GetMenu(main_ww.handle); // un-grey file/save and close menu items
    EnableMenuItem(menu, ID_FILE_SAVE_TBIN, MF_BYCOMMAND | MF_ENABLED);
    EnableMenuItem(menu, ID_FILE_SAVE_CSV, MF_BYCOMMAND | MF_ENABLED);
    EnableMenuItem(menu, ID_FILE_CLOSEDATA, MF_BYCOMMAND | MF_ENABLED);
+   EnableMenuItem(menu, ID_FILE_FILEINFO, MF_BYCOMMAND | MF_ENABLED);
+   EnableMenuItem(menu, ID_OPTIONS_GOTO, MF_BYCOMMAND | MF_ENABLED);
+   if (plotdata.source != DATA_FAKE) show_file_info();
    SCROLLINFO si;
    si.cbSize = sizeof(si);
+#if 0
    // change from 0..100 range for the horizontal scroll box to something larger based on the number of
    // data points, so that we can zoom really close
 #define NUM_PTS_ACROSS 25
@@ -119,6 +135,9 @@ void finish_file(const char *filename) {
    if (maxval < NUM_PTS_ACROSS) maxval = NUM_PTS_ACROSS; // but bound it
    if (maxval > MAXINT32 / 2) maxval = MAXINT32 / 2;
    si.nMax = (int) maxval;
+#endif 0
+   si.nMax = 100000000;  // a very large value, since these are unitless, allows finer resolution
+   // (Using MAXINT causes Windows to fail to draw the scroll box properly, presumably because of overflows.)
    si.nMin = 0;
    si.nPage = plotdata.nvals > 10000000L ?  // if we have a lot of samples
               (UINT) ((uint64_t)10000000L * si.nMax / plotdata.nvals)  // then zoom in to display the first batch
@@ -147,7 +166,7 @@ void discard_data(void) {
    plotdata.blkindex = NULL;
    plotdata.datahead = plotdata.datatail = NULL;
    plotdata.numblks = 0;
-   plotdata.nvals = 0;
+   plotdata.nvals = file_nvals = 0;
    plotdata.maxval = 0.0f;
    SendMessage(label_ww.handle, WM_ERASEBKGND, (WPARAM)GetDC(label_ww.handle), 0);
    SendMessage(plot_ww.handle, WM_ERASEBKGND, (WPARAM)GetDC(plot_ww.handle), 0);
@@ -156,11 +175,15 @@ void discard_data(void) {
    menu = GetMenu(main_ww.handle); // grey out file save and close menu items
    EnableMenuItem(menu, ID_FILE_SAVE_TBIN, MF_BYCOMMAND | MF_GRAYED);
    EnableMenuItem(menu, ID_FILE_SAVE_CSV, MF_BYCOMMAND | MF_GRAYED);
-   EnableMenuItem(menu, ID_FILE_CLOSEDATA, MF_BYCOMMAND | MF_GRAYED); }
+   EnableMenuItem(menu, ID_FILE_CLOSEDATA, MF_BYCOMMAND | MF_GRAYED);
+   EnableMenuItem(menu, ID_FILE_FILEINFO, MF_BYCOMMAND | MF_GRAYED);
+   EnableMenuItem(menu, ID_OPTIONS_GOTO, MF_BYCOMMAND | MF_GRAYED);
+   SetWindowText(main_ww.handle, "grapher"); // put the application name on the title of the main window
+}
 
 void make_fake_data(void) {  // make fake data: 2 sine waves, one increasing, one decreasing
    int ncycles = 100;
-   int npts = 100000;
+   int npts = 100001;
    discard_data();
    plotdata.source = DATA_FAKE;
    plotdata.sampling = 1;
@@ -168,7 +191,7 @@ void make_fake_data(void) {  // make fake data: 2 sine waves, one increasing, on
    plotdata.maxval = 1.0f;
    plotdata.timestart_ns = 0;
    plotdata.timedelta_ns = 1000000;  // 1 msec per point
-   plotdata.nvals = npts;
+   plotdata.nvals = file_nvals = npts;
    strcpy(plotdata.labels[0], "fake data 1");
    strcpy(plotdata.labels[1], "fake data 2");
    float series[2];
@@ -213,7 +236,7 @@ void read_tbin_file(char *filename) {
    plotdata.nseries = tbin_hdr.u.s.ntrks;
    assert(plotdata.nseries <= MAXSERIES, "too many data series: %d", plotdata.nseries);
    for (int trk = 0; trk < plotdata.nseries; ++trk)
-      snprintf(plotdata.labels[trk], MAXLABEL, "trk %d", trk);
+      snprintf(plotdata.labels[trk], MAXLABEL, "track %d", trk);
    int16_t tbin_voltages[MAXSERIES];
    float datapoints[MAXSERIES];
    //uint64_t timenow = plotdata.timestart_ns;
@@ -227,7 +250,8 @@ void read_tbin_file(char *filename) {
             goto tbin_done;
          assert(fread(&tbin_voltages[1], 2, plotdata.nseries - 1, inf) == plotdata.nseries - 1,
                 "can't read .tbin data for heads 1.. ");
-         nbytes += plotdata.nseries * 2; }
+         nbytes += plotdata.nseries * 2;
+         ++file_nvals; }
       for (int series = 0; series < plotdata.nseries; ++series) { // convert from tbin binary to float
          datapoints[series] = (float)tbin_voltages[series] / 32767 * tbin_hdr.u.s.maxvolts; }
       add_data(datapoints);
@@ -235,7 +259,6 @@ void read_tbin_file(char *filename) {
       if (filesize > 10000000L)
          progressbar_show((int)(nbytes * 100 / filesize)); }
 tbin_done:
-   show_file_info();
    progressbar_hide();
    finish_file(filename); }
 
@@ -282,6 +305,7 @@ void read_csv_file(char *filename) {
       int skipped = 0;
       while (fgets(line, MAXLINE, inf)) {  // read all the rest of the data lines until endfile
          nbytes += strlen(line) + 2; // +2 for CRLF
+         ++file_nvals;
          if (++skipped >= sampling) { // process only every "sampling" lines
             skipped = 0;
             linep = line;
@@ -297,7 +321,6 @@ void read_csv_file(char *filename) {
             ++plotdata.nvals;
             if (filesize > 10000000L)
                progressbar_show((int)(nbytes * 100 / filesize)); } }
-      show_file_info();
       progressbar_hide();
       finish_file(filename); }
    else MessageBoxA(NULL, _strerror(NULL), "Error", 0); // can't open file

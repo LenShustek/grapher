@@ -1,20 +1,4 @@
 #pragma once
-// Modify the following defines if you have to target a platform prior to the ones specified below.
-// Refer to MSDN for the latest info on corresponding values for different platforms.
-//#ifndef WINVER              // Allow use of features specific to Windows 7 or later.
-//#define WINVER 0x0700       // Change this to the appropriate value to target other versions of Windows.
-//#endif
-
-//#ifndef _WIN32_WINNT        // Allow use of features specific to Windows 7 or later.
-//#define _WIN32_WINNT 0x0700 // Change this to the appropriate value to target other versions of Windows.
-//#endif
-
-//#ifndef UNICODE
-//#define UNICODE  // we use normal ASCII!
-//#endif
-
-//#define WIN32_LEAN_AND_MEAN     // Exclude rarely-used stuff from Windows headers
-// Windows Header Files:
 
 #include <windows.h>
 #include <windowsx.h>
@@ -34,49 +18,25 @@
 
 #include "Resource.h"
 
-/******************************************************************
-*                                                                 *
-*  Macros                                                         *
-*                                                                 *
-******************************************************************/
+// C++ crap from the template we started with
 
 template<class Interface>
 inline void
 SafeRelease(
-   Interface **ppInterfaceToRelease
-) {
+   Interface **ppInterfaceToRelease) {
    if (*ppInterfaceToRelease != NULL) {
       (*ppInterfaceToRelease)->Release();
-
-      (*ppInterfaceToRelease) = NULL;
-   }
-}
-
-//#ifndef Assert
-//#if defined( DEBUG ) || defined( _DEBUG )
-//#define Assert(b) if (!(b)) {OutputDebugStringA("Assert: " #b "\n");}
-//#else
-//#define Assert(b)
-//#endif //DEBUG || _DEBUG
-//#endif
-
+      (*ppInterfaceToRelease) = NULL; } }
 
 #ifndef HINST_THISCOMPONENT
 EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 #define HINST_THISCOMPONENT ((HINSTANCE)&__ImageBase)
 #endif
 
-/******************************************************************
-*                                                                 *
-*  grapherApp                                                        *
-*                                                                 *
-******************************************************************/
-
 class grapherApp {
 public:
    grapherApp();
    ~grapherApp();
-
    HRESULT Initialize();
 
 private:
@@ -90,7 +50,6 @@ private:
    void DiscardDeviceResources();
    //void drawsine(int ncycles, int npts, D2D1_SIZE_F targetsize);
    HRESULT drawplots();
-
    //void OnResize(UINT width, UINT height);
 
    static LRESULT CALLBACK WndProc(
@@ -111,6 +70,6 @@ private:
    IDWriteFactory *m_pDWriteFactory;
    //ID2D1HwndRenderTarget *m_pRenderTarget;
    IDWriteTextFormat *m_pTextFormat;
-   ID2D1SolidColorBrush *m_pBlackBrush;
-};
+   ID2D1SolidColorBrush *m_pBlackBrush; };
 
+//*

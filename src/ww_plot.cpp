@@ -12,70 +12,6 @@ Released under the MIT License
 
 #include "grapher.h"
 
-#if 0
-void drawsine(int ncycles, int npts, int startpt, int endpt, D2D1_SIZE_F targetsize) {
-   D2D1_POINT_2F prevpoint;
-   dlog("drawsine: %d pts from %d to %d in width %lf height %lf\n", npts, startpt, endpt, targetsize.width, targetsize.height);
-   prevpoint.x = 0;
-   prevpoint.y = targetsize.height / 2;
-   if (endpt > npts) endpt = npts;
-   for (int pt = startpt; pt < endpt; ++pt) {
-      float sinx = (float)sin((2 * 3.1415f*(float)pt * (float)ncycles) / (float)npts); // actual sine wave value
-      D2D1_POINT_2F nextpoint;
-      nextpoint.x = (float)targetsize.width * (float)(pt - startpt) / (endpt - startpt);
-      nextpoint.y = (targetsize.height / 2) * (1 + sinx * pt / npts);  // gradually increasing sine wave
-      //dlog("sinx %f, line from %f, %f to %f, %f\n", sinx, prevpoint.x, prevpoint.y, nextpoint.x, nextpoint.y);
-      plot_ww.target->DrawLine(
-         prevpoint, nextpoint,
-         pBlackBrush, 1.0f);
-      prevpoint = nextpoint; } }
-#endif
-
-#if 0
-HRESULT grapherApp::drawplots() {
-   HRESULT hr;
-   if (!(plot_ww.target->CheckWindowState() & D2D1_WINDOW_STATE_OCCLUDED)) {
-      static const char sc_helloWorld[] = "Hello, World!";
-      dlog("drawplots()\n");
-      // Retrieve the size of the render target.
-      D2D1_SIZE_F canvas = plot_ww.target->GetSize();
-      plot_ww.target->BeginDraw();
-      plot_ww.target->SetTransform(D2D1::Matrix3x2F::Identity());
-      plot_ww.target->Clear(D2D1::ColorF(D2D1::ColorF::White));
-      plot_ww.target->DrawText(
-         sc_helloWorld,
-         ARRAYSIZE(sc_helloWorld) - 1,
-         m_pTextFormat,
-         D2D1::RectF(0, 0, canvas.width, canvas.height),
-         pBlackBrush);
-#if 0
-#define NUMX 10
-#define NUMY 10
-      for (int ix = 0; ix < NUMX; ++ix)
-         for (int iy = 0; iy < NUMY; ++iy)
-            plot_ww.target->DrawLine(
-               D2D1::Point2F(0.0f, 0.0f),
-               D2D1::Point2F(1200.f*ix / NUMX, 800.f*iy / NUMY),
-               pBlackBrush, 0.1f);
-#endif
-      SCROLLINFO si;
-      si.cbSize = sizeof(si);
-      si.fMask = SIF_ALL;
-      GetScrollInfo(plot_ww.handle, SB_HORZ, &si);  // get scrollbar info
-#define NCYCLES 1000
-#define NPOINTS 1000000
-      int startpt = si.nPos/*0..100*/ * NPOINTS / 100;
-      if (si.nPage == 0) si.nPage = 1;
-      int numpts = si.nPage/*0..100*/ * NPOINTS / 100;
-      //dlog("canvas.width, height = %lf, %lf\n", canvas.width, canvas.height);
-      drawsine(NCYCLES, NPOINTS, startpt, startpt + numpts, canvas);
-      hr = plot_ww.target->EndDraw();
-      if (hr == D2DERR_RECREATE_TARGET) {
-         hr = S_OK;
-         DiscardDeviceResources(); } }
-   return hr; }
-#endif
-
 // For efficiency, create an index of the first points in each block so we can search for a point
 // without causing thrashing because the data blocks have to be paged in as we search the linked list
 void make_block_index(void) {
@@ -221,7 +157,7 @@ HRESULT grapherApp::drawplots() {
 void center_plot_on(double time) { // center the plot on "time"
    double timestart = (double)plotdata.timestart_ns / 1e9;
    double timeend = timestart + (double)plotdata.timedelta_ns / 1e9 * plotdata.nvals;
-   if (time >= timestart && time < timeend) {
+   if (time >= timestart && time <= timeend) {
       uint64_t centerpoint = // which point number we want centered
          (uint64_t)((time - timestart)*1e9) / plotdata.timedelta_ns;
       SCROLLINFO si;
@@ -321,7 +257,7 @@ void zoom(struct window_t *ww, enum zoom_t type, bool center_on_cursor) {
    dlog(" changed to %d\n", si.nPage);
    if (center_on_cursor) {
       dlog("change nPos from %d", si.nPos);
-      si.nPos -= ww->mousex * ((int)si.nPage - old_nPage) / (ww->canvas.right - ww->canvas.left);
+      si.nPos -= (int64_t)ww->mousex * ((int64_t)si.nPage - old_nPage) / (int64_t)(ww->canvas.right - ww->canvas.left);
       dlog(" to %d with mouse at %d out of %d\n", si.nPos, ww->mousex, ww->canvas.right - ww->canvas.left);
       si.fMask = SIF_PAGE | SIF_POS; }
    else si.fMask = SIF_PAGE;
@@ -381,10 +317,10 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
          int scroll_amount;
          switch (LOWORD(wParam)) {
          case SB_LINELEFT:  // User clicked the left arrow.
-            scroll_amount = 1;
+            scroll_amount = si.nPage/(plot_ww.canvas.right-plot_ww.canvas.left); // one pixel
             break;
-         case SB_LINERIGHT:
-            scroll_amount = -1;// User clicked the right arrow.
+         case SB_LINERIGHT: // User clicked the right arrow.
+            scroll_amount = -(int)si.nPage / (plot_ww.canvas.right - plot_ww.canvas.left); // one pixel
             break;
          case SB_PAGELEFT: // User clicked the scroll bar shaft left of the scroll box.
             scroll_amount = si.nPage;
@@ -399,9 +335,12 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
             scroll_amount = 0;
             break; }
          si.fMask = SIF_POS;
+         dlog("scrollbar: adjusting nPos %d by %d\n", si.nPos, scroll_amount);
          si.nPos -= scroll_amount;
          SetScrollInfo(hwnd, SB_HORZ, &si, TRUE);
-         ScrollWindow(hwnd, scroll_amount, 0, NULL, NULL);
+         //It's pointless to actually scroll unless we implement partial plot window painting.
+         //ScrollWindow(hwnd, scroll_amount, 0, NULL, NULL);
+         RedrawWindow(plot_ww.handle, NULL, NULL, RDW_INVALIDATE | RDW_ERASE);
          result = 0;
          break;
 
@@ -419,22 +358,29 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
             si.cbSize = sizeof(si);
             si.fMask = SIF_ALL;
             GetScrollInfo(hwnd, SB_HORZ, &si);
-            // (xPos-mousex)/width is the fraction of the visible window (nPage pixels) to move
-            int scroll_amount = ((xPos - plot_ww.mousex) * (int)si.nPage) / (int)canvas.width;
-            dlog("xPos %d plot_ww.mousex %d si.nPage %d canvas.width %d si.nMax %d si.nMin %d\n",
+            // (xPos-mousex)/width is the fraction of the visible window to move
+            // nPage is the number of scrolling units that are visible
+            int scroll_amount = ((xPos - plot_ww.mousex) * (int64_t)si.nPage) / (int64_t)canvas.width;
+            dlog("mousescroll xPos %d plot_ww.mousex %d si.nPage %d canvas.width %d si.nMax %d si.nMin %d\n",
                  xPos, plot_ww.mousex, si.nPage, (int)canvas.width, si.nMax, si.nMin);
-            dlog("scroll at %d by %d\n", xPos, scroll_amount);
-            si.nPos -= scroll_amount;
+            dlog("mousescroll at %d by %d\n", xPos, scroll_amount);
+            if (scroll_amount == 0)
+               //Either the mouse didn't really move, or it moved so little that the above calculation rounds to zero.
+               //In the later case, we want to not update mousex, so that the movement will accumulate.
+               break;
+            si.nPos -= scroll_amount;  // adjust the current scrollbox position
             si.fMask = SIF_POS;
             SetScrollInfo(hwnd, SB_HORZ, &si, TRUE);
-            ScrollWindow(hwnd, scroll_amount, 0, NULL, NULL); }
-         else if (xPos != plot_ww.mousex || yPos != plot_ww.mousey) {
-            vpopup_close();
-            TRACKMOUSEEVENT tme;
+            //It's pointless to actually scroll unless we implement partial plot window painting.
+            //ScrollWindow(hwnd, scroll_amount, 0, NULL, NULL);
+            RedrawWindow(plot_ww.handle, NULL, NULL, RDW_INVALIDATE | RDW_ERASE); }
+         else if (xPos != plot_ww.mousex || yPos != plot_ww.mousey) { // just a mouse movement
+            vpopup_close();  // close the value popup if it's up
+            TRACKMOUSEEVENT tme;  // start a new hover timer
             tme.cbSize = sizeof(TRACKMOUSEEVENT);
             tme.dwFlags = TME_HOVER /* | TME_LEAVE*/ ;
             tme.hwndTrack = plot_ww.handle;
-            tme.dwHoverTime = 500; // msec before WM_MOUSEHOVER is generated
+            tme.dwHoverTime = 250; // msec before WM_MOUSEHOVER is generated
             TrackMouseEvent(&tme); }
          plot_ww.mousex = xPos;
          plot_ww.mousey = yPos; }
@@ -444,16 +390,15 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
          zoom(&plot_ww, GET_WHEEL_DELTA_WPARAM(wParam) < 0 ? ZOOM_OUT : ZOOM_IN, true);
          break;
 
-      case WM_MOUSEHOVER: {
-         // cancel hover request
-         TRACKMOUSEEVENT tme;
+      case WM_MOUSEHOVER: {  // the mouse has been hovering for a while
+         TRACKMOUSEEVENT tme;  // cancel the hover timer
          tme.cbSize = sizeof(TRACKMOUSEEVENT);
          tme.dwFlags = TME_CANCEL | TME_HOVER;
          tme.hwndTrack = plot_ww.handle;
          TrackMouseEvent(&tme);
          int xPos = GET_X_LPARAM(lParam);
          int yPos = GET_Y_LPARAM(lParam);
-         if (check_mouseon_graph(xPos, yPos)) { // if we showed a value popup window
+         if (check_mouseon_graph(xPos, yPos)) { // check for hovering on a plotline
             TRACKMOUSEEVENT tme;
             tme.cbSize = sizeof(TRACKMOUSEEVENT);
             tme.dwFlags = TME_LEAVE;

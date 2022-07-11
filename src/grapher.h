@@ -13,13 +13,21 @@ Released under the MIT License
 
 #include "appstuff.h"
 
+#ifdef _DEBUG  // set by Visual Studio for the DEBUG configuration
+#define DEBUG true
+#else
 #define DEBUG false
+#endif
+
 #define DEFAULT_SAMPLING 3
 
+#define MAXSERIES 12           // maximum number of data series we plot
+#define NDATABLK 5000          // number of samples in a data block
+#define MAXLABEL 20            // maximum length of a label name for a plot
+#define NUM_MARKERS 11         // time markers: L, R, 1..9
+#define LABELWINDOW_WIDTH 80
+#define MARKERWINDOW_WIDTH 200
 #define MAXPATH 300
-#define MAXSERIES 12   // maximum number of data series we plot
-#define NDATABLK 5000  // number of samples in a data block
-#define MAXLABEL 20    // maximum length of a label name for a plot
 
 #if DEBUG 
 #define dassert(...) {assert(__VA_ARGS__);}
@@ -31,6 +39,8 @@ Released under the MIT License
 
 
 extern grapherApp *app;
+enum datasource_t { DATA_CSV, DATA_TBIN, DATA_FAKE };
+enum zoom_t { ZOOM_IN, ZOOM_OUT };
 
 struct datablk_t {   // a block of up to NDATABLK data points for plotdata.nseries series
    struct datablk_t *next, *prev;
@@ -45,13 +55,11 @@ struct blkindex_t {   // index entry
    int count;              // how many data are in the block, 0..NDATABLK
 };
 
-
-enum datasource_t {DATA_CSV, DATA_TBIN, DATA_FAKE};
-
 struct plotdata_t {   // info about our dataset
    bool data_valid; 
    enum datasource_t source;     // where we got the data from
    uint64_t timestart_ns, timedelta_ns;
+   double timestart, timeend;    // time of the first and last points 
    int sampling;                 // what sampling was used when we read the file
    float maxval;                 // max of absolute values
    int nseries;
@@ -78,9 +86,6 @@ struct window_t {  // info about our windows
 };
 extern struct window_t main_ww, label_ww, plot_ww, marker_ww, vpopup_ww;
 
-#define LABELWINDOW_WIDTH 100
-#define MARKERWINDOW_WIDTH 200
-
 struct markers_t {
    const char *name;
    DWORD color;
@@ -92,8 +97,6 @@ struct markers_t {
 };
 extern struct markers_t markers[];
 
-enum zoom_t {ZOOM_IN, ZOOM_OUT };
-
 void debuglog(const char* msg, ...);
 void showhelp(void);
 void show_message_name(struct window_t *ww, UINT message, WPARAM wParam, LPARAM lParam);
@@ -102,6 +105,7 @@ void do_resize(struct window_t *ww, UINT width, UINT height);
 void open_file(HWND);
 void save_file(HWND hwnd, enum datasource_t type);
 void discard_data(void);
+void show_file_info(void);
 void make_block_index(void);
 void get_point(uint64_t pt);
 void get_nextpoint(void);
@@ -120,6 +124,7 @@ char *format_memsize(uint64_t val, char *buf);
 float scanfast_float(char **p);
 double scanfast_double(char **p);
 void set_option_sampling(void);
+void set_option_goto(void);
 
 extern int marker_tracked;  // which marker, if any, the mouse is tracking in the plot window
 extern int sampling;

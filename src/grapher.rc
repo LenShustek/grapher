@@ -28,13 +28,10 @@ LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
 //
 // Icon
 //
-
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
 IDI_GRAPHER             ICON                    "grapher.ico"
-
 IDI_SMALL               ICON                    "small.ico"
-
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -46,6 +43,7 @@ BEGIN
     POPUP "&File"
     BEGIN
         MENUITEM "&Open...",                    ID_FILE_OPEN
+        MENUITEM "File info",                   ID_FILE_FILEINFO
         MENUITEM "&Close data",                 ID_FILE_CLOSEDATA
         MENUITEM "Save .tbin...",               ID_FILE_SAVE_TBIN
         MENUITEM "Save .csv...",                ID_FILE_SAVE_CSV
@@ -54,10 +52,11 @@ BEGIN
     POPUP "Options"
     BEGIN
         MENUITEM "sampling",                    ID_OPTIONS_SAMPLING
+        MENUITEM "goto ...",                    ID_OPTIONS_GOTO
     END
     POPUP "&Help"
     BEGIN
-        MENUITEM "&Help",                       ID_HELP_HELP
+        MENUITEM "view &Help",                  ID_HELP_HELP
         MENUITEM "&About",                      IDM_ABOUT
     END
 END
@@ -80,20 +79,9 @@ END
 // Dialog
 //
 
-IDD_ABOUTBOX DIALOGEX 0, 0, 170, 62
-STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "About grapher"
-FONT 8, "MS Shell Dlg", 0, 0, 0x1
-BEGIN
-    ICON            IDR_MAINFRAME,IDC_STATIC,14,14,21,20
-    LTEXT           "grapher, Version 1.0",IDC_STATIC,42,14,114,8,SS_NOPREFIX
-    LTEXT           "Copyright (c) 2022",IDC_STATIC,42,26,114,8
-    DEFPUSHBUTTON   "OK",IDOK,113,41,50,14,WS_GROUP
-END
-
 IDD_PANIC DIALOGEX 0, 0, 546, 175
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Dialog"
+CAPTION "Internal error"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,227,147,50,14
@@ -101,39 +89,51 @@ END
 
 IDD_INFO DIALOGEX 0, 0, 536, 230
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Dialog"
+CAPTION "Info"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,240,209,50,14
 END
 
-IDD_HELP DIALOGEX 20, 20, 627, 289
+IDD_HELP DIALOGEX 20, 20, 585, 351
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
 EXSTYLE WS_EX_CLIENTEDGE
 CAPTION "Help"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
-    DEFPUSHBUTTON   "OK",IDOK,275,268,50,14
+    DEFPUSHBUTTON   "OK",IDOK,263,332,50,14
 END
 
 IDD_FILE_EXISTS DIALOGEX 0, 0, 341, 122
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Dialog"
+CAPTION "Error"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     DEFPUSHBUTTON   "OK",IDOK,139,101,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,250,101,50,14
 END
 
-IDD_OPTION DIALOGEX 0, 0, 215, 80
+IDD_SAMPLING DIALOGEX 0, 0, 215, 80
 STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Dialog"
+CAPTION "set sampling"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
+    EDITTEXT        IDC_SAMPLING_VALUE,76,27,70,12,ES_AUTOHSCROLL
     DEFPUSHBUTTON   "OK",IDOK,42,52,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,109,53,50,14
-    EDITTEXT        IDC_EDIT1,77,22,70,12,ES_AUTOHSCROLL
-    LTEXT           "new value:",IDC_STATIC,31,22,40,13
+    LTEXT           "new value:",IDC_STATIC,32,27,40,13
+    LTEXT           "message",IDC_SAMPLING_MSG,32,7,128,13
+END
+
+IDD_GOTO DIALOGEX 0, 0, 247, 89
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "goto time"
+FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+    EDITTEXT        IDC_GOTO_TIME,66,38,110,12,ES_AUTOHSCROLL
+    DEFPUSHBUTTON   "OK",IDOK,64,59,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,134,60,50,14
+    CTEXT           "message",IDC_GOTO_MSG,14,17,214,14
 END
 
 
@@ -145,14 +145,6 @@ END
 #ifdef APSTUDIO_INVOKED
 GUIDELINES DESIGNINFO
 BEGIN
-    IDD_ABOUTBOX, DIALOG
-    BEGIN
-        LEFTMARGIN, 7
-        RIGHTMARGIN, 163
-        TOPMARGIN, 7
-        BOTTOMMARGIN, 55
-    END
-
     IDD_PANIC, DIALOG
     BEGIN
         LEFTMARGIN, 7
@@ -172,9 +164,9 @@ BEGIN
     IDD_HELP, DIALOG
     BEGIN
         LEFTMARGIN, 7
-        RIGHTMARGIN, 620
+        RIGHTMARGIN, 578
         TOPMARGIN, 7
-        BOTTOMMARGIN, 282
+        BOTTOMMARGIN, 346
     END
 
     IDD_FILE_EXISTS, DIALOG
@@ -185,12 +177,20 @@ BEGIN
         BOTTOMMARGIN, 115
     END
 
-    IDD_OPTION, DIALOG
+    IDD_SAMPLING, DIALOG
     BEGIN
         LEFTMARGIN, 7
         RIGHTMARGIN, 208
         TOPMARGIN, 7
         BOTTOMMARGIN, 73
+    END
+
+    IDD_GOTO, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 240
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 82
     END
 END
 #endif    // APSTUDIO_INVOKED

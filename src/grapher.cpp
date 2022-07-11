@@ -10,7 +10,7 @@ program analyzes, and I wasn't able to find a program that would work well for
 such large datasets. The Saleae logic analyzer software does a pretty good job,
 but it requires the original very large .logicdata files to be preserved.
 
-This program can read a CSV (comma separated value) file with the first column
+The program can read a CSV (comma separated value) file with the first column
 being the uniformly incremented timestamp for all the plots. The first two lines
 are discarded as headers, but the number of items sets the number of plot lines.
 
@@ -31,32 +31,53 @@ scrolling:  You can click the scrollbar arrows, click scrollbar whitespace, clic
 
 values:     Hover the mouse over a point in the graph to display its value.
 
-markers:    Place by clicking on a marker number and moving the mouse into plot window, then click to place.
-            Make a marker the delta time reference by doubleclicking the marker time.
-            Make a marker visible in the plot window by doubleclicking the marker number.
+markers:    Place a marker on the plot by clicking the marker number, moving the mouse
+                into plot window, then clicking again to place it where you want.
+            Move a placed marker by clicking the circled marker number at the top of the line.
+            Make a marker the delta time reference by doubleclicking the marker's time.
+            Scroll to center a marker in the plot window by doubleclicking the marker's number.
+            Scroll to the start or end of the plot by doubleclicking the L or R marker's name.
 
-File save .tbin or .csv:  The data between markers 1 and 2 is saved into a new file.
-                          If the data came from a .tbin file, that header is used.
+options/goto:  
+            Center the plot on a specified time, and put time marker 9 there.
 
-This is unabashedly a windows-only program for a little-endian 64-bit CPU.
+File/Save.tbin or File/Save.csv:  
+           The data between markers 1 and 2 is saved into a new file of the specified format.
+           If saving .tbin and the data came from a .tbin file, that header is used.
+
+This is unabashedly a windows-only program for a little-endian 64-bit CPU with lots of virtual memory.
 
 Len Shustek
 July 2022
-*******************************************************************************
+*******************************************************************************************************
 ---CHANGE LOG ---
- 8 Jul 2022, L. Shustek, V1.0
-  first version
+ 8 Jul 2022, L. Shustek, V0.1
+ - first version
+
+10 Jul 2022, L. Shustek, V0.2
+ - add a "goto time xxxx.xxxx" options command
+ - improve the options menu behavior
+ - reduce hover time for value popup from 500 to 250 msec
+ - add file/info menu item, and say more
+ - grey out unusable menu items when there is no data
+ - fix whitespace drag scroll and cursor-centered wheel zoom when zoomed way in
+ - make doubleclick on R/L marker names scroll to the corresponding end of the plot
+
 
  */
-#define VERSION "0.1"
+#define VERSION "0.2"
 
 /* TODO:
 - consider dithering the choice of points to plot when we are not displaying some,
   in order to avoid moire patterns with periodic data. But needs to be fast!
 - maybe add some time annotations on the top
 - maybe allow plots to be reordered by dragging the names
+- create a custom icon
 
 done
+- fix whitespace-drag scrolling when zoomed out: requires too much mouse motion
+- add a "go to time xxxx.xxxx" command
+- add an "info" menu item to repeat information (plus more?) about the file
 - add subsampling, and an options menu to change it
 - add source file headers
 - ask for permission to rewrite files
@@ -116,7 +137,7 @@ struct plotdata_t plotdata = { 0 };
 //
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
                    LPSTR /*lpCmdLine*/, int /*nCmdShow*/) {
-#if DEBUG
+#if DEBUG 
    if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole()) { // allow printf to work
       freopen("CONOUT$", "w", stdout);
       freopen("CONOUT$", "w", stderr); }
@@ -199,8 +220,7 @@ grapherApp::~grapherApp() {
 //
 HRESULT grapherApp::Initialize() {
    HRESULT hr;
-   // Initialize device-indpendent resources, such
-   // as the Direct2D factory.
+   // Initialize device-indpendent resources, such as the Direct2D factory.
    hr = CreateDeviceIndependentResources();
    if (SUCCEEDED(hr)) { // Register the window classes
       WNDCLASSEX windowclass = { sizeof(WNDCLASSEX) };   // main application window class
@@ -340,6 +360,7 @@ void grapherApp::DiscardDeviceResources() {
    //SafeRelease(&m_pBlackBrush);
 }
 
+#if 0
 INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
    UNREFERENCED_PARAMETER(lParam);
    switch (message) {
@@ -351,6 +372,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
          return (INT_PTR)TRUE; }
       break; }
    return (INT_PTR)FALSE; }
+#endif
 
 //
 //  Process a WM_SIZE message and resize the render target appropriately.
@@ -408,11 +430,17 @@ LRESULT CALLBACK grapherApp::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPA
             case ID_OPTIONS_SAMPLING:
                set_option_sampling();
                break;
+            case ID_OPTIONS_GOTO:
+               set_option_goto();
+               break;
             case ID_FILE_OPEN:
                open_file(hwnd);
                break;
             case ID_FILE_CLOSEDATA:
                discard_data();
+               break;
+            case ID_FILE_FILEINFO:
+               show_file_info();
                break;
             case ID_FILE_SAVE_TBIN:
                save_file(hwnd, DATA_TBIN);

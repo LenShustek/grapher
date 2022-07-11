@@ -12,7 +12,6 @@ Released under the MIT License
 //
 
 #include "grapher.h"
-#define NUM_MARKERS 11  // L, R, 0..9
 #define MARKER_YSPACING 30
 #define MARKER_X_NUMBERAREA 30  // where the marker's number is (approx?)
 #define MARKER_CIRCLE_DIAM 20   // how big the circle is at the top of the marker vertical line
@@ -20,6 +19,8 @@ Released under the MIT License
 struct markers_t markers[NUM_MARKERS] = {
    {"L", RGB(100,50,50) },
    {"R", RGB(100,50,50) } };
+#define MARKER_LEFT 0
+#define MARKER_RIGHT 1
 
 #define MARKER_DEFAULT_COLOR RGB(50, 50, 100)
 #define MARKER_BOLDEN 0x808080
@@ -107,15 +108,19 @@ bool marker_click(int xpos, int ypos, bool doubleclick) {
          selected_marker = ndx;
          break; } }
    if (selected_marker == -1) {
-     dlog("marker click no match at %d, %d\n", xpos, ypos);
+      dlog("marker click no match at %d, %d\n", xpos, ypos);
       return false; }
    dlog("marker %d click, xPos %d\n", ndx, xpos);
    if (xpos < MARKER_X_NUMBERAREA) { // click was on the marker's number
       if (doubleclick) { // if number was double clicked
-         marker_tracked = -1; // cancel tracking this marker
-         if (markers[ndx].timeset) { // if it has a time,
-            center_plot_on(markers[ndx].time); // put this marker in the center of the plot window
-             } }
+         if (ndx == MARKER_LEFT) // special case for L/R: scroll to left/right of whole plot
+            center_plot_on(plotdata.timestart);
+         else if (ndx == MARKER_RIGHT)
+            center_plot_on(plotdata.timeend);
+         else { // scroll the plot so the clicked-on marker is in the center
+            marker_tracked = -1; // cancel tracking this marker
+            if (markers[ndx].timeset)
+               center_plot_on(markers[ndx].time); } }
       else { // number was single clicked
          marker_tracked = ndx;  // then start tracking this marker in the plot window
          dlog("tracking marker %d\n", ndx); } }
@@ -185,8 +190,8 @@ void grapherApp::create_marker_window(HWND handle) {
    GetClientRect(handle, &marker_ww.canvas); // get the size of the application client window
    dlog("creating marker window within %d,%d to %d,%d\n", marker_ww.canvas.left, marker_ww.canvas.top, marker_ww.canvas.right, marker_ww.canvas.bottom);
    dlog("  x,y = %ld, %ld  width %ld,  height %ld\n",
-          marker_ww.canvas.right - MARKERWINDOW_WIDTH, 0, // x,y position
-          MARKERWINDOW_WIDTH, marker_ww.canvas.bottom - marker_ww.canvas.top); // width, height in pixels
+        marker_ww.canvas.right - MARKERWINDOW_WIDTH, 0, // x,y position
+        MARKERWINDOW_WIDTH, marker_ww.canvas.bottom - marker_ww.canvas.top); // width, height in pixels
    marker_ww.initialized = true; // do early so messages to main window don't cause this to be called again
    marker_ww.handle = CreateWindowEx(  // create the marker child window
                          0, // extended styles
