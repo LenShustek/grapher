@@ -8,7 +8,6 @@
 #define IDM_ABOUT                       104
 #define IDM_EXIT                        105
 #define IDI_GRAPHER                     107
-#define IDI_SMALL                       108
 #define IDC_GRAPHER                     109
 #define IDR_MAINFRAME                   128
 #define IDD_PANIC                       129
@@ -17,18 +16,22 @@
 #define IDD_FILE_EXISTS                 132
 #define IDD_SAMPLING                    136
 #define IDD_GOTO                        137
+#define IDD_DIALOG1                     139
+#define IDD_OPTIONS                     139
 #define IDC_SAMPLING_VALUE              1000
 #define IDC_SAMPLING_MSG                1001
 #define IDC_GOTO_TIME                   1003
 #define IDC_GOTO_MSG                    1004
+#define IDC_OPTIONS_DITHER              1005
 #define ID_FILE_OPEN                    32771
 #define ID_FILE_SAVE_TBIN               32772
 #define ID_FILE_SAVE_CSV                32773
 #define ID_HELP_HELP                    32774
 #define ID_FILE_CLOSEDATA               32775
-#define ID_OPTIONS_SAMPLING             32777
-#define ID_OPTIONS_GOTO                 32778
+#define ID_TOOLS_SAMPLING               32777
+#define ID_TOOLS_GOTO                   32778
 #define ID_FILE_FILEINFO                32779
+#define ID_TOOLS_OPTIONS                32780
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -36,9 +39,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        138
-#define _APS_NEXT_COMMAND_VALUE         32780
-#define _APS_NEXT_CONTROL_VALUE         1004
+#define _APS_NEXT_RESOURCE_VALUE        140
+#define _APS_NEXT_COMMAND_VALUE         32781
+#define _APS_NEXT_CONTROL_VALUE         1005
 #define _APS_NEXT_SYMED_VALUE           110
 #endif
 #endif

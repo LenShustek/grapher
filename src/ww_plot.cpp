@@ -41,9 +41,39 @@ void get_nextpoint(void) { // get the point following the current point
       dassert(plotdata.curblk->firstnum == plotdata.curpt,
               "first point in next block is %lld, not %lld", plotdata.curblk->firstnum, plotdata.curpt); } }
 
-/* The plot graphing routine use the newer D2D1 "Direct2D" API to draw lots of lines, in an
+#if 0 // this didn't work for eliminating Moire effects, so we'll try random numbers instead
+int64_t gcd(int64_t a, int64_t b) { // Eudlid's greatest common divisor algorithm
+   int64_t result = min(a, b);
+   while (result > 0) {
+      if (a % result == 0 && b % result == 0) break;
+      result--; }
+   return result; }
+
+int64_t get_skip_increment(int64_t skipval) {
+   // Try to find a pretty big number relatively prime to skipval that we will increment the modulus by for checking
+   // whether to process a point. The effect of this is to almost randomly choose which of the skip+1 points to process
+   // in each interval, which reduces the appearance of Moire patterns when the data is periodic.
+   int64_t testval = skipval / 3;  // start with 1/3 the value
+   while (1) {
+      if (gcd(skipval, testval) == 1) break; // got it
+      if (++testval >= skipval) testval = 2;
+      assert(testval != skipval / 3, "can't find relatively prime skip value to %lld", skipval); }
+   return testval; }
+#endif
+
+// This works a little for eliminating Moire effects, but not at all magnfications
+uint64_t rand64() { // generate a 64-bit random number
+// George Marsaglia's algorithm: https://en.wikipedia.org/wiki/Xorshift
+   static uint64_t state = 12345;
+   uint64_t x = state;
+   x ^= x << 13;
+   x ^= x >> 7;
+   x ^= x << 17;
+   return state = x; }
+
+/* The plot graphing routine uses the newer D2D1 "Direct2D" API for drawing lots of lines, in an
    attempt to use hardware-accelerated immediate-mode graphics that are executed on the graphics card.
-   I have no idea whether that is actually working.
+   I have no idea whether that is actually happening.
 
    In any case we reduce the number of lines to be drawn by skipping points when the number is greater than the
    screen resolution. We draw a thin vertical line representing the min and max points we skipped as a visual
@@ -78,7 +108,9 @@ HRESULT grapherApp::drawplots() {
          endpt = plotdata.nvals - 1;
          numpts = endpt - startpt + 1; }
       // need to do some edge case checks here for small nvals
+      plotdata.num_pts_plotted = numpts;
       uint64_t skip = numpts / /*2500*/ (int)width  + 1; // if too many points, start skipping some
+      uint64_t skip_mod = 0; // initial modulus for determining which point in a skip interval to plot
       bool plotpoints = width / numpts > PLOTDOT_SIZE; // plot dots at the points if there is space between them
       dlog("plotting every %llu of %llu points out of %llu (%llu to %llu) for %d series in window size %f by %f\n",
            skip, numpts, plotdata.nvals, startpt, endpt, plotdata.nseries, width, height);
@@ -102,38 +134,39 @@ HRESULT grapherApp::drawplots() {
       if (numpts > 5000000) { // if this is going to take a while
          HCURSOR hourglass = LoadCursor(NULL, IDC_WAIT);
          SetCursor(hourglass); }
-      for (uint64_t pt = startpt; ; ++pt) { // **** for all the points: be efficient here!
+      for (uint64_t pt = startpt; ; ++pt) { // **** for all the points: BE EFFICIENT HERE!
          D2D1_POINT_2F next_coords;
          next_coords.x = width * (float)(pt - startpt) / numpts;
-#if !DRAW_MINMAX
-         if ((pt - startpt) % skip == 0)
-#endif
+         bool plot_this_point = (pt - startpt) % skip == skip_mod;
+         if (DRAW_MINMAX || plot_this_point)  // if we're looking at this point
             for (int gr = 0; gr < plotdata.nseries; ++gr) { // for each plot series
-               float dataval = plotdata.curblk->data[plotdata.curndx+gr]; // -plotdata.maxval .. +plotdata.maxval
+               float dataval = plotdata.curblk->data[plotdata.curndx + gr]; // -plotdata.maxval .. +plotdata.maxval
                //assert(dataval <= plotdata.maxval, "data value %f bigger than max %f\n", dataval, plotdata.maxval);
                float midy = plotheight * gr + plotheight_div_2;
                next_coords.y = midy - plotheight_div_2 * dataval / plotdata.maxval;
                dassert(next_coords.y >= midy - plotheight_div_2,
                        "y coord %f too small at point %llu gr %d ndx %d value %f\n",
                        next_coords.y, plotdata.curpt, gr, plotdata.curndx, dataval);
-               if ((pt-startpt) % skip != 0) { // if we're skipping this data point for performance (never true if !MINMAX)
-                  // accumulate min and max of what we're skipping, to draw as one vertical line
+               if (DRAW_MINMAX && !plot_this_point) { // if we're not drawing to this data point for performance
+                  // accumulate min and max of what we're skipping, to draw later as one vertical line
                   if (max_coords[gr].y < next_coords.y) max_coords[gr].y = next_coords.y;
                   if (min_coords[gr].y > next_coords.y) min_coords[gr].y = next_coords.y; }
-               else { // doing this data point
+               else { // drawing to this data point
                   plot_ww.target->DrawLine(prev_coords[gr], next_coords, pBlackBrush, 1.0f);
-                  if (DRAW_MINMAX && skip > 1 && pt > startpt) { // draw vertical line between the points representing skipped point
+                  if (DRAW_MINMAX && skip > 1 && pt > startpt) { // but first: draw vertical line between the points representing skipped points
                      max_coords[gr].x = min_coords[gr].x = (prev_coords[gr].x + next_coords.x) / 2;
                      //dlog("drawing minmax line for pt %llu gr %d at %f from %f to %f, prev.y %f, next.y %f\n",
                      //       pt, gr, max_coords[gr].x, min_coords[gr].y, max_coords[gr].y, prev_coords[gr].y, next_coords.y);
                      plot_ww.target->DrawLine(min_coords[gr], max_coords[gr], pBlackBrush, 0.5f); }
                   // initialize min/max for skipped points. Requires (pt-startpt)%skip == 0 when pt==startpt
-                  max_coords[gr].y = min_coords[gr].y = next_coords.y;
+                  if (DRAW_MINMAX) max_coords[gr].y = min_coords[gr].y = next_coords.y;
                   if (plotpoints) {
                      ellipse.point.x = next_coords.x;
                      ellipse.point.y = next_coords.y;
                      plot_ww.target->DrawEllipse(ellipse, pBlackBrush, 1.0, NULL); }
-                  prev_coords[gr] = next_coords; } }
+                  prev_coords[gr] = next_coords; } } //for all plots
+         if (plot_this_point && skip > 10 && plotdata.do_dither) // maybe dither the modulus and hence the point we plot in the next skip interval
+            skip_mod = rand64() % skip;
          if (pt >= endpt) break;
          get_nextpoint(); };
       draw_markers();
@@ -177,16 +210,24 @@ void center_plot_on(double time) { // center the plot on "time"
       SetScrollInfo(plot_ww.handle, SB_HORZ, &si, true);
       RedrawWindow(plot_ww.handle, NULL, NULL, RDW_INVALIDATE | RDW_ERASE); } }
 
-static bool vpopup_showing = false; // are we showing a voltage popup window?
-
 void vpopup_close(void) {
-   if (vpopup_showing) { // if there's already a popup window
+   TRACKMOUSEEVENT tme;  // cancel the hover timer
+   tme.cbSize = sizeof(TRACKMOUSEEVENT);
+   tme.dwFlags = TME_CANCEL | TME_HOVER;
+   tme.hwndTrack = plot_ww.handle;
+   TrackMouseEvent(&tme);
+   if (vpopup_ww.initialized) { // if there's really a popup window
       dlog("closing vpopup window\n");
       //CloseWindow(vpopup_ww.handle);
       ShowWindow(vpopup_ww.handle, SW_HIDE);
       DestroyWindow(vpopup_ww.handle);
       vpopup_ww.handle = NULL;
-      vpopup_showing = false; } }
+      vpopup_ww.initialized = false; } }
+
+double get_graph_time(int xPos) { // get the time corresponding to the mouse position
+   D2D1_SIZE_F canvas = plot_ww.target->GetSize();
+   float width = canvas.width;
+   return plotdata.leftedge_time + (float(xPos) / width) * (plotdata.rightedge_time - plotdata.leftedge_time); }
 
 bool check_mouseon_graph(int xPos, int yPos) { // has mouse moved onto a graph line?
    vpopup_close();
@@ -218,27 +259,31 @@ bool check_mouseon_graph(int xPos, int yPos) { // has mouse moved onto a graph l
 #define MOUSE_FUZZ 10 // how close, in pixels, we need to be to the graph line
       if (yPos > y_coord - MOUSE_FUZZ
             && yPos < y_coord + MOUSE_FUZZ) {
-         dlog("creating vpopup for graph %d at %d,%d\n", gr, xPos, yPos);
+         dlog("creating vpopup for graph %d at %d,%d for value %lf time %lf\n", gr, xPos, yPos, dataval, pttime);
          //ShowWindow(vpopup_ww.handle, SW_SHOWNORMAL);
          //UpdateWindow(vpopup_ww.handle); //
-         vpopup_ww.handle = CreateWindowEx(WS_EX_STATICEDGE, //WS_EX_CLIENTEDGE,
-                                           "ClassVpopup", "Vpopup", WS_POPUP | WS_BORDER,
-                                           xPos, yPos, 100, 25,
-                                           /*plot_ww.handle*/ NULL, (HMENU)0, HINST_THISCOMPONENT, NULL);
+#define VPOPUP_SIZE 150,40
+         vpopup_ww.handle =
+            CreateWindowEx(WS_EX_STATICEDGE, //WS_EX_CLIENTEDGE,
+                           "ClassVpopup", "Vpopup", WS_POPUP | /*WS_BORDER*/ WS_DLGFRAME,
+                           xPos, yPos, VPOPUP_SIZE,
+                           /*plot_ww.handle*/ NULL, (HMENU)0, HINST_THISCOMPONENT, NULL);
          ShowWindow(vpopup_ww.handle, SW_SHOW);
          HDC hdc = GetDC(vpopup_ww.handle);
-         RECT  rect = {0, 0, 100, 25 };
-         char value[20];
-         snprintf(value, sizeof(value), "%f", dataval);
-         DrawText(hdc, value, -1, &rect, DT_SINGLELINE | DT_NOCLIP | DT_CENTER | DT_VCENTER);
-         vpopup_showing = true; } }
-   return vpopup_showing; }
+         RECT  rect = {0, 0, VPOPUP_SIZE };
+         char msg[100], timestr[30];
+         snprintf(msg, sizeof(msg), "%f\nat %s", dataval, showtime(pttime, timestr, sizeof(timestr)));
+         DrawText(hdc, msg, -1, &rect, DT_NOCLIP | DT_CENTER);
+         vpopup_ww.initialized = true; } }
+#undef VPOPUP_SIZE
+   return vpopup_ww.initialized; }
 
+// voltage popup window: message processing
 LRESULT CALLBACK grapherApp::WndProcVpopup(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
    LRESULT result = 0;
-   show_message_name(&plot_ww, message, wParam, lParam);
+   show_message_name(&vpopup_ww, message, wParam, lParam);
    result = DefWindowProc(hwnd, message, wParam, lParam);
-   --plot_ww.recursion_level;
+   --vpopup_ww.recursion_level;
    return result; }
 
 void zoom(struct window_t *ww, enum zoom_t type, bool center_on_cursor) {
@@ -249,6 +294,8 @@ void zoom(struct window_t *ww, enum zoom_t type, bool center_on_cursor) {
    int old_nPage = si.nPage;
    dlog("zoom %d: scroll box pos %d, page size %d", type, si.nPos, si.nPage);
    if (type == ZOOM_IN) {
+      if (plotdata.num_pts_plotted <= 10) // don't zoom in closer than 10 points per screen
+         return;
       if (si.nPage >= 2) si.nPage = si.nPage * 2 / 3; }
    else if (type == ZOOM_OUT) {
       if (si.nPage < 2) si.nPage = 2;
@@ -276,6 +323,7 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
 
       case WM_PAINT:
       case WM_DISPLAYCHANGE: {
+         vpopup_close();  // close any vpopup and cancel hover timer
          PAINTSTRUCT ps;
          BeginPaint(hwnd, &ps);
          app->drawplots();
@@ -308,19 +356,27 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
             SendMessage(hwnd, WM_HSCROLL, MAKELONG(wScrollNotify, 0), 0L); }
       break;
 
+      case WM_MOUSEWHEEL: // grow/shrink scroll box from mouse wheel
+         zoom(&plot_ww, GET_WHEEL_DELTA_WPARAM(wParam) < 0 ? ZOOM_OUT : ZOOM_IN, true);
+         break;
+
       case WM_HSCROLL:
          // see https://docs.microsoft.com/en-us/windows/win32/controls/about-scroll-bars
          SCROLLINFO si;
          si.cbSize = sizeof(si);
          si.fMask = SIF_ALL;
          GetScrollInfo(hwnd, SB_HORZ, &si);
-         int scroll_amount;
+         int scroll_amount, min_amount;
+         min_amount = si.nMax / 100000; // 1%, pretty arbitrary
          switch (LOWORD(wParam)) {
          case SB_LINELEFT:  // User clicked the left arrow.
-            scroll_amount = si.nPage/(plot_ww.canvas.right-plot_ww.canvas.left); // one pixel
+            scroll_amount = +(int)si.nPage / (plot_ww.canvas.right - plot_ww.canvas.left); // one pixel
+            // Windows doesn't do this right when the page is really small compared to nMax...
+            if (scroll_amount < min_amount) scroll_amount = min_amount;
             break;
          case SB_LINERIGHT: // User clicked the right arrow.
-            scroll_amount = -(int)si.nPage / (plot_ww.canvas.right - plot_ww.canvas.left); // one pixel
+            scroll_amount =  -(int)si.nPage / (plot_ww.canvas.right - plot_ww.canvas.left); // one pixel
+            if (scroll_amount > -min_amount) scroll_amount = -min_amount;
             break;
          case SB_PAGELEFT: // User clicked the scroll bar shaft left of the scroll box.
             scroll_amount = si.nPage;
@@ -335,7 +391,7 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
             scroll_amount = 0;
             break; }
          si.fMask = SIF_POS;
-         dlog("scrollbar: adjusting nPos %d by %d\n", si.nPos, scroll_amount);
+         dlog("scrollbar: adjusting nPos %d by %d, nPage is %d\n", si.nPos, scroll_amount, si.nPage);
          si.nPos -= scroll_amount;
          SetScrollInfo(hwnd, SB_HORZ, &si, TRUE);
          //It's pointless to actually scroll unless we implement partial plot window painting.
@@ -386,10 +442,6 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
          plot_ww.mousey = yPos; }
       break;
 
-      case WM_MOUSEWHEEL: // grow/shrink scroll box from mouse wheel
-         zoom(&plot_ww, GET_WHEEL_DELTA_WPARAM(wParam) < 0 ? ZOOM_OUT : ZOOM_IN, true);
-         break;
-
       case WM_MOUSEHOVER: {  // the mouse has been hovering for a while
          TRACKMOUSEEVENT tme;  // cancel the hover timer
          tme.cbSize = sizeof(TRACKMOUSEEVENT);
@@ -399,14 +451,15 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
          int xPos = GET_X_LPARAM(lParam);
          int yPos = GET_Y_LPARAM(lParam);
          if (check_mouseon_graph(xPos, yPos)) { // check for hovering on a plotline
-            TRACKMOUSEEVENT tme;
-            tme.cbSize = sizeof(TRACKMOUSEEVENT);
-            tme.dwFlags = TME_LEAVE;
-            tme.hwndTrack = plot_ww.handle;
-            TrackMouseEvent(&tme); } }
+            //TRACKMOUSEEVENT tme; // don't need this: moving the mouse will take it down
+            //tme.cbSize = sizeof(TRACKMOUSEEVENT);
+            //tme.dwFlags = TME_LEAVE; // request WM_MOUSELEAVE notifiation
+            //tme.hwndTrack = plot_ww.handle;
+            //TrackMouseEvent(&tme);
+         } }
       break;
 
-      case WM_MOUSELEAVE:
+      case WM_MOUSELEAVE: // mouse has left the hover area
          vpopup_close();
          break;
 
@@ -417,6 +470,10 @@ LRESULT CALLBACK grapherApp::WndProcPlot(HWND hwnd, UINT message, WPARAM wParam,
             int xPos = GET_X_LPARAM(lParam);
             int yPos = GET_Y_LPARAM(lParam);
             check_marker_plot_click(xPos, yPos); } }
+      break;
+
+      case WM_RBUTTONDOWN: { // right click: copy time to clipboard
+         copy_time(get_graph_time(/*xPos*/GET_X_LPARAM(lParam))); }
       break;
 
       case WM_SIZE: {
@@ -465,22 +522,5 @@ void grapherApp::create_plot_window(HWND handle) {
       make_fake_data();  // invent a dataset to display
       ShowWindow(plot_ww.handle, SW_SHOWNORMAL);
       UpdateWindow(plot_ww.handle); } }
-
-#if 0
-void grapherApp::create_Vpopup_window(HWND handle) {
-   vpopup_ww.handle = CreateWindowEx(  // create the voltage popup window
-                         0, // extended styles
-                         "ClassVpopup",  // registered class name
-                         NULL, // window name
-                         WS_OVERLAPPEDWINDOW, // style
-                         0, 0, // x,y position
-                         100, 50, // width, height
-                         NULL, // parent
-                         NULL, // menu or child
-                         HINST_THISCOMPONENT, // application instance
-                         NULL); // context
-   if (vpopup_ww.handle) {
-      CreateWindowResources(&vpopup_ww); } }
-#endif
 
 //*

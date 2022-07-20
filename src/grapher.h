@@ -19,14 +19,15 @@ Released under the MIT License
 #define DEBUG false
 #endif
 
-#define DEFAULT_SAMPLING 3
+#define DEFAULT_SAMPLING 3     // works well for readtape mag tape data
+#define DEFAULT_DITHER true    // even though it's only sometimes effective
 
 #define MAXSERIES 12           // maximum number of data series we plot
 #define NDATABLK 5000          // number of samples in a data block
 #define MAXLABEL 20            // maximum length of a label name for a plot
 #define NUM_MARKERS 11         // time markers: L, R, 1..9
 #define LABELWINDOW_WIDTH 80
-#define MARKERWINDOW_WIDTH 200
+#define MARKERWINDOW_WIDTH 225
 #define MAXPATH 300
 
 #if DEBUG 
@@ -61,8 +62,9 @@ struct plotdata_t {   // info about our dataset
    uint64_t timestart_ns, timedelta_ns;
    double timestart, timeend;    // time of the first and last points 
    int sampling;                 // what sampling was used when we read the file
+   bool do_dither;               // whether we should do dithering of the point being displayed
    float maxval;                 // max of absolute values
-   int nseries;
+   int nseries;                  // number of plots we draw
    uint64_t nvals;               // number of values in the dataset
    int numblks;                  // number of blocks it takes to store them
    struct datablk_t *datahead, *datatail; // ptrs to the head and tail of the data block chain
@@ -70,7 +72,9 @@ struct plotdata_t {   // info about our dataset
    uint64_t curpt;               // the current point number we're looking at
    struct datablk_t *curblk;     // the block it's in
    int curndx;                   // the index in data[] to the plotdata.nseries data values for that point
+   uint64_t num_pts_plotted;     // the number of points we last plotted
    double leftedge_time, rightedge_time; // time in seconds displayed in the window
+
    char labels[MAXSERIES][MAXLABEL];  // labels for the plots
 };
 extern struct plotdata_t plotdata;
@@ -123,8 +127,10 @@ char *showtime(double time, char *buf, int bufsize);
 char *format_memsize(uint64_t val, char *buf);
 float scanfast_float(char **p);
 double scanfast_double(char **p);
-void set_option_sampling(void);
-void set_option_goto(void);
+void set_tools_sampling(void);
+void set_tools_goto(void);
+void set_tools_options(void);
+void copy_time(double time);
 
 extern int marker_tracked;  // which marker, if any, the mouse is tracking in the plot window
 extern int sampling;

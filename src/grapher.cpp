@@ -5,31 +5,33 @@ This is a data visualizer that displays up to 12 time-series plots on a single
 chart that can be scrolled horizontally and zoomed in or out. It is designed
 to be relatively efficient when there are billions of points.
 
-This was motivated by needing to see the magnetic tape data that the "readtape"
-program analyzes, and I wasn't able to find a program that would work well for
-such large datasets. The Saleae logic analyzer software does a pretty good job,
-but it requires the original very large .logicdata files to be preserved.
+It was motivated by needing to see the analog data that the "readtape" program 
+for magnetic tape data recover analyzes. (https://github.com/LenShustek/readtape)
+I wasn't able to find a program that would work well for such very large datasets. 
+The Saleae logic analyzer software that collects the analog signals does a pretty 
+good job, but it requires that the original very large .logicdata files be preserved.
 
-The program can read a CSV (comma separated value) file with the first column
-being the uniformly incremented timestamp for all the plots. The first two lines
-are discarded as headers, but the number of items sets the number of plot lines.
+This program can read a CSV (comma separated value) file, where the first column
+is the uniformly incremented timestamp for all the plots. The first two lines are
+discarded as headers, but the number of items in them sets the number of plot lines.
 
 It can also read the more compact TBIN file as defined for the readtape program.
 
-Since our tape data tends to be smooth and well-sampled, we subsample by using
-only every 3rd data point. You can change that with the options/sampling menu.
+Since our tape data tends to be smooth and well-sampled, by default we subsample by
+using only every 3rd data point. You can change that with the tools/sampling menu.
 
-You can save a subset of the data as a CSV or TBIN file. If subsampling is on,
-it will warn you about saving a lower-resolution file.
+You can save a subset of the data between specified times as a CSV or TBIN file. 
+If subsampling is on, it will warn you about saving a lower-resolution file.
 
 Here are the user controls:
 
-zooming:    Wheel up with the mouse in the plot window zooms in, wheel down zooms out.
+zooming:    Wheel up or arrow up with the mouse in the plot window zooms in, 
+            wheel down or arrow down zooms out.
 
-scrolling:  You can click the scrollbar arrows, click scrollbar whitespace, click and drag
-            the scrollbar box, or click and drag whitespace in the plot area.
-
-values:     Hover the mouse over a point in the graph to display its value.
+scrolling:  Click the scrollbar arrows, click scrollbar whitespace, click and drag the
+            box, click and drag whitespace in the plot area, or use left/right arrows.
+            
+values:     Hover the mouse over a point in the graph to display its value and time.
 
 markers:    Place a marker on the plot by clicking the marker number, moving the mouse
                 into plot window, then clicking again to place it where you want.
@@ -38,12 +40,20 @@ markers:    Place a marker on the plot by clicking the marker number, moving the
             Scroll to center a marker in the plot window by doubleclicking the marker's number.
             Scroll to the start or end of the plot by doubleclicking the L or R marker's name.
 
-options/goto:  
-            Center the plot on a specified time, and put time marker 9 there.
+copy time:  Right clicking a marker's displayed time, or right clicking anywhere in the 
+            plot window, copies the time to the Windows clipboard.
+
+tools/goto:  
+            Centers the plot on a specified time, and puts time marker 9 there.
 
 File/Save.tbin or File/Save.csv:  
            The data between markers 1 and 2 is saved into a new file of the specified format.
-           If saving .tbin and the data came from a .tbin file, that header is used.
+           If saving .tbin and the data came from a .tbin file, its header is used.
+
+tools/options
+            dither sampled points: Randomly choose the point to draw a line to when we're
+            skpping points closer together than the screen resolution. This somewhat reduces
+            the Moire effect when zoomed out on a periodic waveform, but not entirely.
 
 This is unabashedly a windows-only program for a little-endian 64-bit CPU with lots of virtual memory.
 
@@ -52,29 +62,44 @@ July 2022
 *******************************************************************************************************
 ---CHANGE LOG ---
  8 Jul 2022, L. Shustek, V0.1
- - first version
+- first version
 
 10 Jul 2022, L. Shustek, V0.2
- - add a "goto time xxxx.xxxx" options command
- - improve the options menu behavior
- - reduce hover time for value popup from 500 to 250 msec
- - add file/info menu item, and say more
- - grey out unusable menu items when there is no data
- - fix whitespace drag scroll and cursor-centered wheel zoom when zoomed way in
- - make doubleclick on R/L marker names scroll to the corresponding end of the plot
+- add a "goto time xxxx.xxxx" options command
+- improve the options menu behavior
+- reduce hover time for value popup from 500 to 250 msec
+- add file/info menu item, and say more
+- grey out unusable menu items when there is no data
+- fix whitespace drag scroll and cursor-centered wheel zoom when zoomed way in
+- make doubleclick on R/L marker names scroll to the corresponding end of the plot
 
+ 20 Jul 2022, L. Shustek, V0.3
+- create a custom icon for the program
+- rename the "options" menu to "tools", and add an "options" submenu
+- add a "dither sampled point" option, but it only sometimes works well
+    to reduce Moire effects on periodic waveforms
+- have the value popup window also show the time
+- have a right click on the marker time or in the plot copy the time to the clipboard
+- don't zoom in closer than showing 10 points across the window
+- work around a Windows bug to make arrow scrolling better when zoomed way in
+- fix bug: doubleclicking L or R marker supressed value popups until the next plot click
 
  */
-#define VERSION "0.2"
 
-/* TODO:
-- consider dithering the choice of points to plot when we are not displaying some,
-  in order to avoid moire patterns with periodic data. But needs to be fast!
-- maybe add some time annotations on the top
-- maybe allow plots to be reordered by dragging the names
+#define VERSION "0.3"
+
+/* possible TODOs:
+- recent file list
+- "head skew" per-graph delay while reading the file
+- vertical gridlines option
+- add some time annotations on the top
+- allow plots to be reordered by dragging the names
+- for other uses, accomodate data values not centered around 0
+
+TODOs done
+- dithering the choice of points to plot when we are not displaying some,
+  in order to avoid moire patterns with periodic data. (Only works at some magnifications.)
 - create a custom icon
-
-done
 - fix whitespace-drag scrolling when zoomed out: requires too much mouse motion
 - add a "go to time xxxx.xxxx" command
 - add an "info" menu item to repeat information (plus more?) about the file
@@ -227,6 +252,7 @@ HRESULT grapherApp::Initialize() {
       windowclass.style         = CS_HREDRAW | CS_VREDRAW;
       windowclass.lpfnWndProc   = grapherApp::WndProc;
       windowclass.cbClsExtra    = 0;
+      windowclass.hIcon = LoadIcon(HINST_THISCOMPONENT, MAKEINTRESOURCE(IDI_GRAPHER));
       windowclass.cbWndExtra    = sizeof(LONG_PTR);
       windowclass.hInstance     = HINST_THISCOMPONENT;
       windowclass.hbrBackground = NULL;
@@ -281,6 +307,7 @@ HRESULT grapherApp::Initialize() {
                           HINST_THISCOMPONENT, // application instance
                           this ); // context
       dlog("created main window handle %llX\n", (uint64_t) main_ww.handle);
+      plotdata.do_dither = DEFAULT_DITHER;
       app = this;
       hr = main_ww.handle ? S_OK : E_FAIL;
       if (SUCCEEDED(hr)) {
@@ -427,11 +454,14 @@ LRESULT CALLBACK grapherApp::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPA
             case ID_HELP_HELP:
                showhelp();
                break;
-            case ID_OPTIONS_SAMPLING:
-               set_option_sampling();
+            case ID_TOOLS_SAMPLING:
+               set_tools_sampling();
                break;
-            case ID_OPTIONS_GOTO:
-               set_option_goto();
+            case ID_TOOLS_GOTO:
+               set_tools_goto();
+               break;
+            case ID_TOOLS_OPTIONS:
+               set_tools_options();
                break;
             case ID_FILE_OPEN:
                open_file(hwnd);

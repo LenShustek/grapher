@@ -11,6 +11,11 @@ Released under the MIT License
 ******************************************************************************/#include "grapher.h"
 #include "csvtbin.h"
 
+// Compiled with Microsoft Visual Studio Community 2017
+// Info on creating icons:
+// https://stackoverflow.com/questions/40933304/how-to-create-an-icon-for-visual-studio-with-just-mspaint-and-visual-studio
+// https://docs.microsoft.com/en-us/previous-versions/ms997538(v=msdn.10)
+
 #if defined(_WIN32) // there is NO WAY to do this in an OS-independent fashion!
 #define ftello _ftelli64
 #define fseeko _fseeki64
@@ -123,7 +128,7 @@ void finish_file(const char *filename) {
    EnableMenuItem(menu, ID_FILE_SAVE_CSV, MF_BYCOMMAND | MF_ENABLED);
    EnableMenuItem(menu, ID_FILE_CLOSEDATA, MF_BYCOMMAND | MF_ENABLED);
    EnableMenuItem(menu, ID_FILE_FILEINFO, MF_BYCOMMAND | MF_ENABLED);
-   EnableMenuItem(menu, ID_OPTIONS_GOTO, MF_BYCOMMAND | MF_ENABLED);
+   EnableMenuItem(menu, ID_TOOLS_GOTO, MF_BYCOMMAND | MF_ENABLED);
    if (plotdata.source != DATA_FAKE) show_file_info();
    SCROLLINFO si;
    si.cbSize = sizeof(si);
@@ -136,7 +141,7 @@ void finish_file(const char *filename) {
    if (maxval > MAXINT32 / 2) maxval = MAXINT32 / 2;
    si.nMax = (int) maxval;
 #endif 0
-   si.nMax = 100000000;  // a very large value, since these are unitless, allows finer resolution
+   si.nMax = 10000000;  // a very large value, since these are unitless, allows finer resolution
    // (Using MAXINT causes Windows to fail to draw the scroll box properly, presumably because of overflows.)
    si.nMin = 0;
    si.nPage = plotdata.nvals > 10000000L ?  // if we have a lot of samples
@@ -177,7 +182,7 @@ void discard_data(void) {
    EnableMenuItem(menu, ID_FILE_SAVE_CSV, MF_BYCOMMAND | MF_GRAYED);
    EnableMenuItem(menu, ID_FILE_CLOSEDATA, MF_BYCOMMAND | MF_GRAYED);
    EnableMenuItem(menu, ID_FILE_FILEINFO, MF_BYCOMMAND | MF_GRAYED);
-   EnableMenuItem(menu, ID_OPTIONS_GOTO, MF_BYCOMMAND | MF_GRAYED);
+   EnableMenuItem(menu, ID_TOOLS_GOTO, MF_BYCOMMAND | MF_GRAYED);
    SetWindowText(main_ww.handle, "grapher"); // put the application name on the title of the main window
 }
 

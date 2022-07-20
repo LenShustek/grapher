@@ -44,7 +44,7 @@ void set_marker(int ndx, double time) {
 void show_markers(HWND hwnd) {  // show markers in the right markers windows
    char buf[40];
    char markername[20];
-   char timestr[25], deltastr[25];
+   char timestr[30], deltastr[30];
    PAINTSTRUCT ps;
    HDC hdc = BeginPaint(hwnd, &ps);
    int rc;
@@ -99,7 +99,11 @@ void draw_markers(void) {  // draw markers in the plot window
                                   pRedBrush); }
       else markers[ndx].visible = false; } }
 
-bool marker_click(int xpos, int ypos, bool doubleclick) {
+enum { SINGLECLICK, DOUBLECLICK };  // click
+enum { LEFTCLICK, RIGHTCLICK };     // button
+
+bool marker_click(int xpos, int ypos, int click, int button) {
+   // See if we clicked on a marker's number or time
    int selected_marker = -1;
    int ndx;
    for (ndx = 0; ndx < NUM_MARKERS; ++ndx) {
@@ -112,22 +116,25 @@ bool marker_click(int xpos, int ypos, bool doubleclick) {
       return false; }
    dlog("marker %d click, xPos %d\n", ndx, xpos);
    if (xpos < MARKER_X_NUMBERAREA) { // click was on the marker's number
-      if (doubleclick) { // if number was double clicked
-         if (ndx == MARKER_LEFT) // special case for L/R: scroll to left/right of whole plot
-            center_plot_on(plotdata.timestart);
-         else if (ndx == MARKER_RIGHT)
-            center_plot_on(plotdata.timeend);
-         else { // scroll the plot so the clicked-on marker is in the center
-            marker_tracked = -1; // cancel tracking this marker
-            if (markers[ndx].timeset)
-               center_plot_on(markers[ndx].time); } }
-      else { // number was single clicked
-         marker_tracked = ndx;  // then start tracking this marker in the plot window
-         dlog("tracking marker %d\n", ndx); } }
-   else // click was in the time area:
-      if (doubleclick && markers[ndx].timeset) { // maybe make this the reference marker
+      if (button == LEFTCLICK) { // by the left button
+         if (click == DOUBLECLICK) { // if number was double clicked
+            marker_tracked = -1; // cancel any tracking of this marker
+            if (ndx == MARKER_LEFT) // special case for L/R: scroll to left/right of whole plot
+               center_plot_on(plotdata.timestart);
+            else if (ndx == MARKER_RIGHT)
+               center_plot_on(plotdata.timeend);
+            else { // scroll the plot so the clicked-on marker is in the center
+               if (markers[ndx].timeset)
+                  center_plot_on(markers[ndx].time); } }
+         else { // number was single clicked
+            marker_tracked = ndx;  // then start tracking this marker in the plot window
+            dlog("tracking marker %d\n", ndx); } } }
+   else { // click was in the time area:
+      if (button == LEFTCLICK && click == DOUBLECLICK && markers[ndx].timeset) { // maybe make this the reference marker
          marker_reference = ndx;
          RedrawWindow(marker_ww.handle, NULL, NULL, RDW_INVALIDATE | RDW_ERASE); }
+      else if (button == RIGHTCLICK && markers[ndx].timeset) { // right click time: copy to clipboard
+         copy_time(markers[ndx].time); } }
    return true; }
 
 void check_marker_plot_click(int xPos, int yPos) { // check if we just clicked on a marker name in the plot window
@@ -172,13 +179,19 @@ LRESULT CALLBACK grapherApp::WndProcMarker(HWND hwnd, UINT message, WPARAM wPara
    case WM_LBUTTONDOWN: {  // first left button click
       int xPos = GET_X_LPARAM(lParam);
       int yPos = GET_Y_LPARAM(lParam);
-      marker_click(xPos, yPos, false); }
+      marker_click(xPos, yPos, SINGLECLICK, LEFTCLICK); }
    break;
 
    case WM_LBUTTONDBLCLK: {  // double left button click
       int xPos = GET_X_LPARAM(lParam);
       int yPos = GET_Y_LPARAM(lParam);
-      marker_click(xPos, yPos, true); }
+      marker_click(xPos, yPos, DOUBLECLICK, LEFTCLICK); }
+   break;
+
+   case WM_RBUTTONDOWN: { // right button click: copy time
+      int xPos = GET_X_LPARAM(lParam);
+      int yPos = GET_Y_LPARAM(lParam);
+      marker_click(xPos, yPos, SINGLECLICK, RIGHTCLICK); }
    break;
 
    default:

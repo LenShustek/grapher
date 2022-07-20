@@ -11,7 +11,7 @@ Released under the MIT License
 
 #include "grapher.h"
 
-//*********************   Options/Sampling   ********************************
+//*********************   tools/sampling   ********************************
 
 int sampling = DEFAULT_SAMPLING;
 
@@ -60,10 +60,10 @@ close_sampling:
    }
    return result; }
 
-void set_option_sampling(void) {
+void set_tools_sampling(void) {
    DialogBox(HINST_THISCOMPONENT, MAKEINTRESOURCE(IDD_SAMPLING), main_ww.handle, WndProcSampling); }
 
-//*********************   Options/Goto   ********************************
+//*********************   tools/goto   ********************************
 
 LRESULT CALLBACK WndProcGoto(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
    dlog("Goto dialog: message %s\n", msgname(message, false));
@@ -73,7 +73,7 @@ LRESULT CALLBACK WndProcGoto(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
    case WM_INITDIALOG: {
       char msg[60];
       snprintf(msg, sizeof(msg), "Enter a time between %lf and %lf",
-                            plotdata.timestart, plotdata.timeend );
+               plotdata.timestart, plotdata.timeend );
       SetDlgItemText(hwnd, IDC_GOTO_MSG, msg); }
    break;
 
@@ -112,5 +112,48 @@ close_goto:
    }
    return result; }
 
-void set_option_goto(void) {
+void set_tools_goto(void) {
    DialogBox(HINST_THISCOMPONENT, MAKEINTRESOURCE(IDD_GOTO), main_ww.handle, WndProcGoto); }
+
+//*********************   tools/options   ********************************
+
+LRESULT CALLBACK WndProcoptions(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
+   dlog("options dialog: message %s\n", msgname(message, false));
+   LRESULT result = true;
+   switch (message) {
+
+   case WM_INITDIALOG: {
+      CheckDlgButton(hwnd, IDC_OPTIONS_DITHER,
+                     plotdata.do_dither ? BST_CHECKED : BST_UNCHECKED); }
+   break;
+
+   case WM_COMMAND: {
+      WORD control_id = LOWORD(wParam);
+      WORD notif_code = HIWORD(wParam);
+      dlog("options: notif_code %d, control_id %d\n", notif_code, control_id);
+      switch (control_id) {
+      case IDOK: { // OK button
+         UINT result = IsDlgButtonChecked(hwnd, IDC_OPTIONS_DITHER);
+         if (result == BST_CHECKED) plotdata.do_dither = TRUE;
+         if (result == BST_UNCHECKED) plotdata.do_dither = FALSE;
+         goto close_options; }
+      break;
+
+      case IDCANCEL: // Cancel button
+         goto close_options; } }
+   break; // command
+
+   case WM_CLOSE:   // x in upper right corner
+close_options:
+      EndDialog(hwnd, 0);//destroy dialog window
+      break;
+
+   default:
+      result = false; // we didn't process this message
+      // result = DefWindowProc(hwnd, message, wParam, lParam); // don't do this for dialog boxes!
+      // https://docs.microsoft.com/en-us/windows/win32/api/winuser/nc-winuser-dlgproc
+   }
+   return result; }
+
+void set_tools_options(void) {
+   DialogBox(HINST_THISCOMPONENT, MAKEINTRESOURCE(IDD_OPTIONS), main_ww.handle, WndProcoptions); }

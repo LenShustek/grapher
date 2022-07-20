@@ -114,7 +114,7 @@ void show_message_name(struct window_t *ww, UINT message, WPARAM wParam, LPARAM 
    SYSTEMTIME time;
    GetSystemTime(&time);
    if (msg) dlog("%lu: %s(%d) message %s (%08X, %016llX)\n",
-                      time.wSecond*1000+time.wMilliseconds, ww->name, ww->recursion_level, msg, (unsigned)wParam, (unsigned long long)lParam); }
+                    time.wSecond*1000+time.wMilliseconds, ww->name, ww->recursion_level, msg, (unsigned)wParam, (unsigned long long)lParam); }
 
 // convert a wide-character ASCII string to normal single-byte chars
 void wchar_to_ascii(LPWSTR src, char *dst, int buflen) {
@@ -163,18 +163,18 @@ char *u64commas(uint64_t n, char buf[26]) { // 64 bits, max: 9,223,372,036,854,7
    return p + 1; }
 
 char *showtime(double time, char *buf, int bufsize) {
-   // buf must be at least 25 chars
+   // buf must be at least 30 chars
    double abstime = time < 0 ? -time : time;
    if (abstime == 0)
       strcpy(buf, "0");
    else if (abstime < 1e-6)
-      sprintf_s(buf, bufsize, "%.5f ns", time * 1e9);
+      sprintf_s(buf, bufsize, "%.6f ns", time * 1e9);
    else if (abstime < 1e-3)
-      sprintf_s(buf, bufsize, "%.5f us", time * 1e6);
+      sprintf_s(buf, bufsize, "%.6f us", time * 1e6);
    else if (abstime < 1.0f)
-      sprintf_s(buf, bufsize, "%.5f ms", time * 1e3);
+      sprintf_s(buf, bufsize, "%.6f ms", time * 1e3);
    else
-      sprintf_s(buf, bufsize, "%.5f s", time);
+      sprintf_s(buf, bufsize, "%.6f s", time);
    return buf; }
 
 char *format_memsize(uint64_t val, char *buf) { // format as xxx.x KB, MB, or GB
@@ -238,5 +238,41 @@ void debuglog(const char* msg, ...) { // debugging log
    va_start(args, msg);
    vlog(msg, args);
    va_end(args); }
+
+// MessageBox with auto-timeout
+
+//https://stackoverflow.com/questions/3091300/messagebox-with-timeout-or-closing-a-messagebox-from-another-thread
+int DU_MessageBoxTimeout(HWND hWnd, const char* sText, const char* sCaption, UINT uType, DWORD dwMilliseconds) {
+   // Displays a message box, and dismisses it after the specified timeout.
+   typedef int(__stdcall *MSGBOXAPI)(IN HWND hWnd, IN LPCSTR lpText, IN LPCSTR lpCaption, IN UINT uType, IN WORD wLanguageId, IN DWORD dwMilliseconds);
+   int iResult;
+   HMODULE hUser32 = LoadLibraryA("user32.dll");
+   if (hUser32) {
+      auto MessageBoxTimeoutA = (MSGBOXAPI)GetProcAddress(hUser32, "MessageBoxTimeoutA");
+      iResult = MessageBoxTimeoutA(hWnd, sText, sCaption, uType, 0, dwMilliseconds);
+      FreeLibrary(hUser32); }
+   else iResult = MessageBoxA(hWnd, sText, sCaption, uType);  // oups, fallback to the standard function!
+   return iResult; }
+
+void copy_time(double time) { // copy a time as text to the Windows clipboard
+   char clipboard[25];
+   int length = 1 + snprintf(clipboard, sizeof(clipboard), "%.8lf", time);
+   dlog("to clipboard: %s\n", clipboard);
+   if (OpenClipboard(NULL)) {
+      EmptyClipboard();
+      HGLOBAL global;
+      if (global = GlobalAlloc(GMEM_MOVEABLE, length)) {
+         char *dst = (char *)GlobalLock(global);
+         memcpy(dst, clipboard, length);
+         GlobalUnlock(global);
+         SetClipboardData(CF_TEXT, global); }
+      //"If SetClipboardData succeeds, the system owns the object identified by the hMem parameter.
+      // The application may not write to or free the data once ownership has been transferred to the system."
+      CloseClipboard(); }
+   char msg[100];
+   snprintf(msg, sizeof(msg), "copied to clipboard: %s", clipboard);
+   //MessageBoxA(NULL, msg, "Info", 0);  // can we get this to timeout?
+   DU_MessageBoxTimeout(NULL, msg, "Info", 0, 2000);  // yup!
+}
 
 //*
