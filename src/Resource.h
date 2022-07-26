@@ -18,6 +18,7 @@
 #define IDD_GOTO                        137
 #define IDD_DIALOG1                     139
 #define IDD_OPTIONS                     139
+#define IDC_CURSOR1                     140
 #define IDC_SAMPLING_VALUE              1000
 #define IDC_SAMPLING_MSG                1001
 #define IDC_GOTO_TIME                   1003
@@ -39,7 +40,7 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        140
+#define _APS_NEXT_RESOURCE_VALUE        141
 #define _APS_NEXT_COMMAND_VALUE         32781
 #define _APS_NEXT_CONTROL_VALUE         1005
 #define _APS_NEXT_SYMED_VALUE           110

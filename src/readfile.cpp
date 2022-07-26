@@ -6,7 +6,7 @@ Handle reading and writing of CSV and TBIN files
 
 See grapher.cpp for the consolidated change log
 
-Copyright (C) 2018,2019,2022 Len Shustek
+Copyright (C) 2022 Len Shustek
 Released under the MIT License
 ******************************************************************************/#include "grapher.h"
 #include "csvtbin.h"
@@ -144,8 +144,9 @@ void finish_file(const char *filename) {
    si.nMax = 10000000;  // a very large value, since these are unitless, allows finer resolution
    // (Using MAXINT causes Windows to fail to draw the scroll box properly, presumably because of overflows.)
    si.nMin = 0;
-   si.nPage = plotdata.nvals > 10000000L ?  // if we have a lot of samples
-              (UINT) ((uint64_t)10000000L * si.nMax / plotdata.nvals)  // then zoom in to display the first batch
+#define MANY_SAMPLES 1000000L
+   si.nPage = plotdata.nvals > MANY_SAMPLES ?  // if we have a lot of samples
+              (UINT) ((uint64_t)MANY_SAMPLES * si.nMax / plotdata.nvals)  // then zoom in to display the first batch
               : si.nMax; // otherwise set the initial page size to max, ie zoom all the way out
    dlog("set initial scroll nPage to %d out of %d, given %lld values\n", si.nPage, si.nMax, plotdata.nvals);
    si.fMask = SIF_RANGE + SIF_PAGE;
@@ -316,7 +317,7 @@ void read_csv_file(char *filename) {
             linep = line;
             float sampletime = scanfast_float(&linep);  // get (and ignore) the time of this sample
             float datapoints[MAXSERIES];
-            for (int series = 0; series < plotdata.nseries; ++series) {  // read voltages for all series
+            for (int series = 0; series < plotdata.nseries; ++series) {  // read values for all series
                float datapoint = scanfast_float(&linep);
                datapoints[series] = datapoint;
                if (datapoint < 0) {

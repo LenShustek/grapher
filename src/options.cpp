@@ -5,7 +5,7 @@ Display and get configuration options
 
 See grapher.cpp for the consolidated change log
 
-Copyright (C) 2018,2019,2022 Len Shustek
+Copyright (C) 2022 Len Shustek
 Released under the MIT License
 ******************************************************************************///
 
@@ -34,7 +34,7 @@ LRESULT CALLBACK WndProcSampling(HWND hwnd, UINT message, WPARAM wParam, LPARAM 
       case IDOK: { // OK button
          BOOL success;
          int value = GetDlgItemInt(hwnd, IDC_SAMPLING_VALUE, &success, false);
-         if (success) {
+         if (success && value > 0) {
             sampling =value;
             dlog("options: set sampling to %d\n", sampling);
             char msg[50];

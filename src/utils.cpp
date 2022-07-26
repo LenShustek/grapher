@@ -6,7 +6,7 @@ Various utility routines for conversions, formatting, messages, tec.
 
 See grapher.cpp for the consolidated change log
 
-Copyright (C) 2018,2019,2022 Len Shustek
+Copyright (C) 2022 Len Shustek
 Released under the MIT License
 ******************************************************************************/
 
@@ -109,12 +109,14 @@ const char *msgname(unsigned message, bool ignoresome) {  // translate message n
    return msgnames[ndx].name; }
 
 void show_message_name(struct window_t *ww, UINT message, WPARAM wParam, LPARAM lParam) {
-   ++ww->recursion_level;
-   const char *msg = msgname(message, true);
-   SYSTEMTIME time;
-   GetSystemTime(&time);
-   if (msg) dlog("%lu: %s(%d) message %s (%08X, %016llX)\n",
-                    time.wSecond*1000+time.wMilliseconds, ww->name, ww->recursion_level, msg, (unsigned)wParam, (unsigned long long)lParam); }
+   if (DEBUG_SHOW_MESSAGES) {
+      ++ww->recursion_level;
+      const char *msg = msgname(message, true);
+      SYSTEMTIME time;
+      GetSystemTime(&time);
+      if (msg) dlog("%lu: %s(%d) message %s (%08X, %016llX)\n",
+                       time.wSecond * 1000 + time.wMilliseconds, ww->name, ww->recursion_level, msg,
+                       (unsigned)wParam, (unsigned long long)lParam); } }
 
 // convert a wide-character ASCII string to normal single-byte chars
 void wchar_to_ascii(LPWSTR src, char *dst, int buflen) {
@@ -122,10 +124,34 @@ void wchar_to_ascii(LPWSTR src, char *dst, int buflen) {
       *dst++ = *src >= 0x20 && *src <= 0x7e ? (char)*src : '?';
    *dst = 0; }
 
+// Debugging log routines
+
+FILE *rlogf = NULL;
+static void vlog(const char *msg, va_list args) {
+   va_list args2;
+   va_copy(args2, args);
+   vfprintf(stdout, msg, args);  // to the console
+   if (!rlogf)
+      rlogf = fopen("grapher.log", "w");
+   vfprintf(rlogf, msg, args2); // and the log file
+   va_end(args2); }
+
+void debuglog(const char* msg, ...) { // debugging log
+   static FILE *debugf;
+   va_list args;
+   va_start(args, msg);
+   vlog(msg, args);
+   va_end(args); }
+
 void assert(bool b, const char *msg, ...) {
    if (!b) {
+      static bool in_assert = false;
+      if (in_assert) exit(16);
+      in_assert = true;
       va_list args;
       va_start(args, msg);
+      vlog(msg, args);
+      debuglog("\n");
       char buf[200];
       vsnprintf(buf, sizeof(buf), msg, args);
       va_end(args);
@@ -163,10 +189,10 @@ char *u64commas(uint64_t n, char buf[26]) { // 64 bits, max: 9,223,372,036,854,7
    return p + 1; }
 
 char *showtime(double time, char *buf, int bufsize) {
-   // buf must be at least 30 chars
+   // buf must be at least 15 chars
    double abstime = time < 0 ? -time : time;
    if (abstime == 0)
-      strcpy(buf, "0");
+      strcpy(buf, "0.000000   "); // 3 spaces for "no units"
    else if (abstime < 1e-6)
       sprintf_s(buf, bufsize, "%.6f ns", time * 1e9);
    else if (abstime < 1e-3)
@@ -174,7 +200,7 @@ char *showtime(double time, char *buf, int bufsize) {
    else if (abstime < 1.0f)
       sprintf_s(buf, bufsize, "%.6f ms", time * 1e3);
    else
-      sprintf_s(buf, bufsize, "%.6f s", time);
+      sprintf_s(buf, bufsize, "%.6f s ", time);
    return buf; }
 
 char *format_memsize(uint64_t val, char *buf) { // format as xxx.x KB, MB, or GB
@@ -220,27 +246,9 @@ double scanfast_double(char **p) {
          divisor *= 10; } }
    return negative ? -n : n; }
 
-// Debugging log routines
-
-FILE *rlogf = NULL;
-static void vlog(const char *msg, va_list args) {
-   va_list args2;
-   va_copy(args2, args);
-   vfprintf(stdout, msg, args);  // to the console
-   if (!rlogf)
-      rlogf = fopen("grapher.log", "w");
-   vfprintf(rlogf, msg, args2); // and the log file
-   va_end(args2); }
-
-void debuglog(const char* msg, ...) { // debugging log
-   static FILE *debugf;
-   va_list args;
-   va_start(args, msg);
-   vlog(msg, args);
-   va_end(args); }
-
 // MessageBox with auto-timeout
 
+//This is apparently an undocumented Windows function that has been around since Windows XP in 2001.
 //https://stackoverflow.com/questions/3091300/messagebox-with-timeout-or-closing-a-messagebox-from-another-thread
 int DU_MessageBoxTimeout(HWND hWnd, const char* sText, const char* sCaption, UINT uType, DWORD dwMilliseconds) {
    // Displays a message box, and dismisses it after the specified timeout.
@@ -272,7 +280,7 @@ void copy_time(double time) { // copy a time as text to the Windows clipboard
    char msg[100];
    snprintf(msg, sizeof(msg), "copied to clipboard: %s", clipboard);
    //MessageBoxA(NULL, msg, "Info", 0);  // can we get this to timeout?
-   DU_MessageBoxTimeout(NULL, msg, "Info", 0, 2000);  // yup!
+   DU_MessageBoxTimeout(NULL, msg, "Info", 0, 2000);  // yes!
 }
 
 //*

@@ -5,16 +5,17 @@ Manage the right window with all the time markers
 
 See grapher.cpp for the consolidated change log
 
-Copyright (C) 2018,2019,2022 Len Shustek
+Copyright (C) 2022 Len Shustek
 Released under the MIT License
 ******************************************************************************///
 // Marker window
 //
 
 #include "grapher.h"
-#define MARKER_YSPACING 30
-#define MARKER_X_NUMBERAREA 30  // where the marker's number is (approx?)
-#define MARKER_CIRCLE_DIAM 20   // how big the circle is at the top of the marker vertical line
+#define MARKER_YSPACING 30      // vertical spacing in the marker window
+#define MARKER_X_NUMBERAREA 30  // where the marker's time starts (approx)
+#define MARKER_X_DELTAAREA 110  // where the marker's delta time starts (approx)
+#define MARKER_CIRCLE_DIAM 20   // how big the circle is at the top of the plot window marker vertical line
 
 struct markers_t markers[NUM_MARKERS] = {
    {"L", RGB(100,50,50) },
@@ -25,8 +26,8 @@ struct markers_t markers[NUM_MARKERS] = {
 #define MARKER_DEFAULT_COLOR RGB(50, 50, 100)
 #define MARKER_BOLDEN 0x808080
 
-int marker_reference = 0;  // which maker ndx is the delta time reference
-int marker_tracked = -1;   // which marker is being tracked by the cursor in the plot window
+int marker_reference = 0;  // which marker ndx is the delta time reference
+int marker_tracked = -1;   // which marker is being tracked by the cursor in the plot window, if any
 
 void clear_markers(void) {
    int y = 30; // leave room for title
@@ -46,32 +47,39 @@ void show_markers(HWND hwnd) {  // show markers in the right markers windows
    char markername[20];
    char timestr[30], deltastr[30];
    PAINTSTRUCT ps;
+   RECT  rect;
    HDC hdc = BeginPaint(hwnd, &ps);
+   SelectFont(hdc, (HFONT)GetStockObject(ANSI_FIXED_FONT));
+   SetTextCharacterExtra(hdc, -1); // narrow character spacing
+   GetClientRect(hwnd, &rect);
+   rect.top = 5;
+   SetTextColor(hdc, LABEL_COLOR);
+   DrawText(hdc, "      time           delta", -1, &rect, DT_SINGLELINE | DT_NOCLIP);
    int rc;
    int markernum = 1;
    for (int ndx = 0; ndx < NUM_MARKERS; ++ndx) {
-      RECT  rect;
       GetClientRect(hwnd, &rect);
       DWORD color = markers[ndx].color;
       SetTextColor(hdc, (color ? color : MARKER_DEFAULT_COLOR));
       rect.left = 5;
       rect.top = markers[ndx].markerww_y_coord;
       if (markers[ndx].name)
-         snprintf(markername, sizeof(markername), "%s", markers[ndx].name);
+         snprintf(markername, sizeof(markername), "%s:", markers[ndx].name);
       else
          snprintf(markername, sizeof(markername), "%d:", markernum++);
       if (markers[ndx].timeset) {
-         sprintf_s(buf, sizeof(buf), "%s %s, %s", markername,
+         sprintf_s(buf, sizeof(buf), "%s %13s %14s", markername, // (only delta can be negative)
                    showtime(markers[ndx].time, timestr, sizeof(timestr)),
                    showtime(markers[ndx].time - markers[marker_reference].time, deltastr, sizeof(deltastr))); }
       else
-         sprintf_s(buf, sizeof(buf), "%s xxx", markername);
+         sprintf_s(buf, sizeof(buf), "%s", markername);
       rc = DrawText(hdc, buf, -1, &rect, DT_SINGLELINE | DT_NOCLIP); }
    EndPaint(hwnd, &ps); }
 
-void draw_markers(void) {  // draw markers in the plot window
-   //We have to use D2D1 do be able to draw circles and lines.
-   //But there is no ASCII version of D2D1 DrawText (?!?), so we have to use WCHARs in this function.
+void draw_plot_markers(void) { // Draw markers in the plot window as vertical lines topped with circled numbers.
+   //We use D2D1 to draw circled letters and lines into the same double-buffer that we are using to draw the plots.
+   //But there is apparently no ASCII version of D2D1 DrawText (?!?), so we have to use WCHARs in this function.
+   // Note: plot_ww.target->BeginDraw() has already been called.
    int markernum = 1;
    for (int ndx = 0; ndx < NUM_MARKERS; ++ndx) {
       WCHAR markername[20];
@@ -79,8 +87,8 @@ void draw_markers(void) {  // draw markers in the plot window
          swprintf(markername, sizeof(markername) / 2, L"%hs", markers[ndx].name);
       else
          swprintf(markername, sizeof(markername) / 2, L"%d", markernum++);
-      if (!markers[ndx].name   // only do markers with generated name? ie not R or L
-            && markers[ndx].timeset
+      if (!markers[ndx].name   // a change: only do markers with a generated name, ie not R or L
+            && markers[ndx].timeset  // and only those set with a time within the windows
             && markers[ndx].time >= plotdata.leftedge_time
             && markers[ndx].time <= plotdata.rightedge_time) {
          markers[ndx].visible = true;
@@ -103,7 +111,7 @@ enum { SINGLECLICK, DOUBLECLICK };  // click
 enum { LEFTCLICK, RIGHTCLICK };     // button
 
 bool marker_click(int xpos, int ypos, int click, int button) {
-   // See if we clicked on a marker's number or time
+   // See if we clicked on a marker's number or time in the marker window
    int selected_marker = -1;
    int ndx;
    for (ndx = 0; ndx < NUM_MARKERS; ++ndx) {
@@ -133,11 +141,13 @@ bool marker_click(int xpos, int ypos, int click, int button) {
       if (button == LEFTCLICK && click == DOUBLECLICK && markers[ndx].timeset) { // maybe make this the reference marker
          marker_reference = ndx;
          RedrawWindow(marker_ww.handle, NULL, NULL, RDW_INVALIDATE | RDW_ERASE); }
-      else if (button == RIGHTCLICK && markers[ndx].timeset) { // right click time: copy to clipboard
-         copy_time(markers[ndx].time); } }
+      else if (button == RIGHTCLICK && markers[ndx].timeset) { // right click time area: copy to clipboard
+         copy_time(xpos < MARKER_X_DELTAAREA ?  markers[ndx].time // either the marker's time
+                   : markers[ndx].time - markers[marker_reference].time);   // or the marker's delta time
+      } }
    return true; }
 
-void check_marker_plot_click(int xPos, int yPos) { // check if we just clicked on a marker name in the plot window
+void check_marker_plot_click(int xPos, int yPos) { // see if we just clicked on a marker name in the plot window
    D2D1_SIZE_F canvas = plot_ww.target->GetSize();
    for (int ndx = 0; ndx < NUM_MARKERS; ++ndx)
       if (markers[ndx].visible) {
@@ -162,13 +172,9 @@ LRESULT CALLBACK grapherApp::WndProcMarker(HWND hwnd, UINT message, WPARAM wPara
       break;
 
    case WM_PAINT:
-   case WM_DISPLAYCHANGE: {
-      //PAINTSTRUCT ps;
-      //BeginPaint(hwnd, &ps);
+   case WM_DISPLAYCHANGE:
       show_markers(hwnd);
-      //EndPaint(hwnd, &ps);
-   }
-   break;
+      break;
 
    case WM_SIZE: {
       UINT width = LOWORD(lParam);
@@ -206,21 +212,23 @@ void grapherApp::create_marker_window(HWND handle) {
         marker_ww.canvas.right - MARKERWINDOW_WIDTH, 0, // x,y position
         MARKERWINDOW_WIDTH, marker_ww.canvas.bottom - marker_ww.canvas.top); // width, height in pixels
    marker_ww.initialized = true; // do early so messages to main window don't cause this to be called again
-   marker_ww.handle = CreateWindowEx(  // create the marker child window
-                         0, // extended styles
-                         "ClassMarker",  // registered class name
-                         "Markers", // window name
-                         /*WS_OVERLAPPEDWINDOW |*/  WS_CHILD /*| WS_CAPTION*/ | WS_BORDER, // style
-                         marker_ww.canvas.right - MARKERWINDOW_WIDTH, 0, // x,y position
-                         MARKERWINDOW_WIDTH, // width in pixels
-                         marker_ww.canvas.bottom - marker_ww.canvas.top, // height in pixels
-                         handle, // parent
-                         NULL, // menu or child
-                         HINST_THISCOMPONENT, // application instance
-                         NULL); // context
+   marker_ww.handle =
+      CreateWindowEx(  // create the marker child window
+         0, // extended styles
+         "ClassMarker",  // registered class name
+         "Markers", // window name
+         /*WS_OVERLAPPEDWINDOW |*/  WS_CHILD /*| WS_CAPTION*/ | WS_BORDER, // style
+         marker_ww.canvas.right - MARKERWINDOW_WIDTH, 0, // x,y position
+         MARKERWINDOW_WIDTH, // width in pixels
+         marker_ww.canvas.bottom - marker_ww.canvas.top, // height in pixels
+         handle, // parent
+         NULL, // menu or child
+         HINST_THISCOMPONENT, // application instance
+         NULL); // context
    if (marker_ww.handle) {
       clear_markers();
-      SetWindowTextA(marker_ww.handle, "Markers");  // doesn't work....
+      // We omit WS_CAPTION and a name to have thin borders and leave maximum room for marker info
+      //SetWindowTextA(marker_ww.handle, "markers");
       CreateWindowResources(&marker_ww);
       ShowWindow(marker_ww.handle, SW_SHOWNORMAL);
       UpdateWindow(marker_ww.handle);

@@ -6,7 +6,7 @@ Global symbols
 
 See grapher.cpp for the consolidated change log
 
-Copyright (C) 2018,2019,2022 Len Shustek
+Copyright (C) 2022 Len Shustek
 Released under the MIT License
 ******************************************************************************/
 #pragma once
@@ -18,6 +18,7 @@ Released under the MIT License
 #else
 #define DEBUG false
 #endif
+#define DEBUG_SHOW_MESSAGES false  // show window messages in log?
 
 #define DEFAULT_SAMPLING 3     // works well for readtape mag tape data
 #define DEFAULT_DITHER true    // even though it's only sometimes effective
@@ -27,7 +28,8 @@ Released under the MIT License
 #define MAXLABEL 20            // maximum length of a label name for a plot
 #define NUM_MARKERS 11         // time markers: L, R, 1..9
 #define LABELWINDOW_WIDTH 80
-#define MARKERWINDOW_WIDTH 225
+#define MARKERWINDOW_WIDTH 200
+#define LABEL_COLOR RGB(100, 100, 100)
 #define MAXPATH 300
 
 #if DEBUG 
@@ -73,6 +75,7 @@ struct plotdata_t {   // info about our dataset
    struct datablk_t *curblk;     // the block it's in
    int curndx;                   // the index in data[] to the plotdata.nseries data values for that point
    uint64_t num_pts_plotted;     // the number of points we last plotted
+   uint64_t first_pt_plotted;    // the first point we last plotted
    double leftedge_time, rightedge_time; // time in seconds displayed in the window
 
    char labels[MAXSERIES][MAXLABEL];  // labels for the plots
@@ -120,7 +123,7 @@ char *u64commas(uint64_t n, char buf[26]);
 void make_fake_data(void);
 void clear_markers(void);
 void set_marker(int ndx, double time);
-void draw_markers(void);
+void draw_plot_markers(void);
 void check_marker_plot_click(int xPos, int yPos);
 void center_plot_on(double time);
 char *showtime(double time, char *buf, int bufsize);

@@ -5,32 +5,32 @@ This is a data visualizer that displays up to 12 time-series plots on a single
 chart that can be scrolled horizontally and zoomed in or out. It is designed
 to be relatively efficient when there are billions of points.
 
-It was motivated by needing to see the analog data that the "readtape" program 
-for magnetic tape data recover analyzes. (https://github.com/LenShustek/readtape)
-I wasn't able to find a program that would work well for such very large datasets. 
-The Saleae logic analyzer software that collects the analog signals does a pretty 
+It was motivated by needing to see the analog data analyzed by the "readtape"
+system for magnetic tape data recovery, https://github.com/LenShustek/readtape.
+I wasn't able to find a program that would work well for such very large datasets.
+The Saleae logic analyzer software that collects the analog signals does a pretty
 good job, but it requires that the original very large .logicdata files be preserved.
 
-This program can read a CSV (comma separated value) file, where the first column
-is the uniformly incremented timestamp for all the plots. The first two lines are
-discarded as headers, but the number of items in them sets the number of plot lines.
+This program can read a CSV (comma separated value) file, where the first column is
+the uniformly incremented timestamp for all the plots. The first two lines are discarded
+as headers, but the number of items in the second line sets the number of plot lines.
 
 It can also read the more compact TBIN file as defined for the readtape program.
 
 Since our tape data tends to be smooth and well-sampled, by default we subsample by
 using only every 3rd data point. You can change that with the tools/sampling menu.
 
-You can save a subset of the data between specified times as a CSV or TBIN file. 
+You can save a subset of the data between specified times as a CSV or TBIN file.
 If subsampling is on, it will warn you about saving a lower-resolution file.
 
 Here are the user controls:
 
-zooming:    Wheel up or arrow up with the mouse in the plot window zooms in, 
+zooming:    Wheel up or arrow up with the mouse in the plot window zooms in,
             wheel down or arrow down zooms out.
 
 scrolling:  Click the scrollbar arrows, click scrollbar whitespace, click and drag the
             box, click and drag whitespace in the plot area, or use left/right arrows.
-            
+
 values:     Hover the mouse over a point in the graph to display its value and time.
 
 markers:    Place a marker on the plot by clicking the marker number, moving the mouse
@@ -40,20 +40,20 @@ markers:    Place a marker on the plot by clicking the marker number, moving the
             Scroll to center a marker in the plot window by doubleclicking the marker's number.
             Scroll to the start or end of the plot by doubleclicking the L or R marker's name.
 
-copy time:  Right clicking a marker's displayed time, or right clicking anywhere in the 
-            plot window, copies the time to the Windows clipboard.
+copy time:  Right clicking a marker's displayed time or delta time, or right clicking
+            anywhere in the plot window, copies the time to the Windows clipboard.
 
-tools/goto:  
+tools/goto:
             Centers the plot on a specified time, and puts time marker 9 there.
-
-File/Save.tbin or File/Save.csv:  
-           The data between markers 1 and 2 is saved into a new file of the specified format.
-           If saving .tbin and the data came from a .tbin file, its header is used.
 
 tools/options
             dither sampled points: Randomly choose the point to draw a line to when we're
             skpping points closer together than the screen resolution. This somewhat reduces
             the Moire effect when zoomed out on a periodic waveform, but not entirely.
+
+File/Save.tbin or File/Save.csv:
+           The data between markers 1 and 2 is saved into a new file of the specified format.
+           If saving .tbin and the data came from a .tbin file, the original header is used.
 
 This is unabashedly a windows-only program for a little-endian 64-bit CPU with lots of virtual memory.
 
@@ -84,19 +84,25 @@ July 2022
 - work around a Windows bug to make arrow scrolling better when zoomed way in
 - fix bug: doubleclicking L or R marker supressed value popups until the next plot click
 
+23 Jul 2022, L. Shustek, V0.4
+- for the value popup, draw a little circle around the actual point
+- have the marker window use a narrow fixed-width font so columns line up
+- make right-click on the marker delta copy the delta, not the marker's time
+- don't allow sampling to be set to 0
  */
 
-#define VERSION "0.3"
+#define VERSION "0.4"
 
 /* possible TODOs:
-- recent file list
+- recent file list, but where to store them?
 - "head skew" per-graph delay while reading the file
-- vertical gridlines option
-- add some time annotations on the top
+- vertical gridlines option, but for what purpose?
+- add some time annotations on the top, but not needed w/ L/R markers?
 - allow plots to be reordered by dragging the names
 - for other uses, accomodate data values not centered around 0
 
 TODOs done
+- highlight the point whose value is in the mouse-hover popup window
 - dithering the choice of points to plot when we are not displaying some,
   in order to avoid moire patterns with periodic data. (Only works at some magnifications.)
 - create a custom icon
@@ -162,7 +168,7 @@ struct plotdata_t plotdata = { 0 };
 //
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/,
                    LPSTR /*lpCmdLine*/, int /*nCmdShow*/) {
-#if DEBUG 
+#if DEBUG
    if (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole()) { // allow printf to work
       freopen("CONOUT$", "w", stdout);
       freopen("CONOUT$", "w", stderr); }
@@ -282,7 +288,7 @@ HRESULT grapherApp::Initialize() {
       windowclass.lpszClassName = "ClassLabel";
       RegisterClassEx(&windowclass);
 
-      windowclass.lpfnWndProc = grapherApp::WndProcVpopup;  // voltage popup window class
+      windowclass.lpfnWndProc = grapherApp::WndProcVpopup;  // value popup window class
       windowclass.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); // draws background when window is maximized
       windowclass.style = CS_HREDRAW | CS_VREDRAW;
       windowclass.lpszMenuName = NULL; // no menu
@@ -294,18 +300,19 @@ HRESULT grapherApp::Initialize() {
       dlog("dpiX %f, dpiY %f\n", dpiX, dpiY);
       dlog("sizeof(ptr)=%d\n", (int)sizeof(&dpiX));
       //NB: "Before returning, CreateWindow sends a WM_CREATE message to the window procedure."
-      main_ww.handle = CreateWindowEx(  // create the main application window
-                          0, // extended styles
-                          "ClassApp",  // registered class name
-                          "grapher", // window name
-                          WS_OVERLAPPEDWINDOW, // style
-                          CW_USEDEFAULT, CW_USEDEFAULT, // x,y position
-                          static_cast<UINT>(ceil(640.f * dpiX / 96.f)), // width, height: scale from DPI to pixels
-                          static_cast<UINT>(ceil(480.f * dpiY / 96.f)),
-                          NULL, // parent
-                          NULL, // menu or child
-                          HINST_THISCOMPONENT, // application instance
-                          this ); // context
+      main_ww.handle =
+         CreateWindowEx(  // create the main application window
+            0, // extended styles
+            "ClassApp",  // registered class name
+            "grapher", // window name
+            WS_OVERLAPPEDWINDOW, // style
+            CW_USEDEFAULT, CW_USEDEFAULT, // x,y position
+            static_cast<UINT>(ceil(640.f * dpiX / 96.f)), // width, height: scale from DPI to pixels
+            static_cast<UINT>(ceil(480.f * dpiY / 96.f)),
+            NULL, // parent
+            NULL, // menu or child
+            HINST_THISCOMPONENT, // application instance
+            this ); // context
       dlog("created main window handle %llX\n", (uint64_t) main_ww.handle);
       plotdata.do_dither = DEFAULT_DITHER;
       app = this;
@@ -386,20 +393,6 @@ void grapherApp::DiscardDeviceResources() {
    //SafeRelease(&m_pRenderTarget);
    //SafeRelease(&m_pBlackBrush);
 }
-
-#if 0
-INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
-   UNREFERENCED_PARAMETER(lParam);
-   switch (message) {
-   case WM_INITDIALOG:
-      return (INT_PTR)TRUE;
-   case WM_COMMAND:
-      if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL) {
-         EndDialog(hDlg, LOWORD(wParam));
-         return (INT_PTR)TRUE; }
-      break; }
-   return (INT_PTR)FALSE; }
-#endif
 
 //
 //  Process a WM_SIZE message and resize the render target appropriately.

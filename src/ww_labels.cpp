@@ -5,7 +5,7 @@ Manage the left window with the plot labels
 
 See grapher.cpp for the consolidated change log
 
-Copyright (C) 2018,2019,2022 Len Shustek
+Copyright (C) 2022 Len Shustek
 Released under the MIT License
 ******************************************************************************///
 
@@ -16,14 +16,14 @@ void show_labels(HWND hwnd) {  // show labels in the left window
    PAINTSTRUCT ps;
    HDC hdc = BeginPaint(hwnd, &ps);
    int plotheight = (label_ww.canvas.bottom - label_ww.canvas.top) / plotdata.nseries;
-   plotheight -= 1;  // ??? experimentally deduced correction for proper vertical alignment
-   int ycoord = plotheight / 2 - 10; // ditto for -10
+   plotheight -=1;  // ??? experimentally deduced correction for proper vertical alignment
+   int ycoord = plotheight / 2 - 10; // ditto for -x
    int rc;
    dlog("in show_labels, valid_data  = %d, nseries = %d\n", plotdata.data_valid, plotdata.nseries);
    if (plotdata.data_valid) for (int ndx = 0; ndx < plotdata.nseries; ++ndx) {
          RECT  rect;
          GetClientRect(hwnd, &rect);
-         SetTextColor(hdc, RGB(50, 50, 100));
+         SetTextColor(hdc, LABEL_COLOR);
          rect.left = 5;
          rect.top = ycoord;
          strncpy_s(labelname, plotdata.labels[ndx], sizeof(labelname));
@@ -91,7 +91,8 @@ void grapherApp::create_label_window(HWND handle) {
                         HINST_THISCOMPONENT, // application instance
                         NULL); // context
    if (label_ww.handle) {
-      SetWindowTextA(label_ww.handle, "Markers");  // doesn't work....
+      // WS_CAPTION doesn't leave enough room for labels when the window is small
+      //SetWindowTextA(label_ww.handle, "plots");  
       CreateWindowResources(&label_ww);
       ShowWindow(label_ww.handle, SW_SHOWNORMAL);
       UpdateWindow(label_ww.handle);

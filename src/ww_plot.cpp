@@ -6,7 +6,7 @@ Generate the center plot window, and handle zoooming and scrolling
 
 See grapher.cpp for the consolidated change log
 
-Copyright (C) 2018,2019,2022 Len Shustek
+Copyright (C) 2022 Len Shustek
 Released under the MIT License
 ******************************************************************************/
 
@@ -61,7 +61,7 @@ int64_t get_skip_increment(int64_t skipval) {
    return testval; }
 #endif
 
-// This works a little for eliminating Moire effects, but not at all magnfications
+// This works somewhat for eliminating Moire effects, but not at all magnfications
 uint64_t rand64() { // generate a 64-bit random number
 // George Marsaglia's algorithm: https://en.wikipedia.org/wiki/Xorshift
    static uint64_t state = 12345;
@@ -109,7 +109,8 @@ HRESULT grapherApp::drawplots() {
          numpts = endpt - startpt + 1; }
       // need to do some edge case checks here for small nvals
       plotdata.num_pts_plotted = numpts;
-      uint64_t skip = numpts / /*2500*/ (int)width  + 1; // if too many points, start skipping some
+      plotdata.first_pt_plotted = startpt;
+      uint64_t skip = numpts / (int)width  + 1; // if more points than pixels, start skipping some
       uint64_t skip_mod = 0; // initial modulus for determining which point in a skip interval to plot
       bool plotpoints = width / numpts > PLOTDOT_SIZE; // plot dots at the points if there is space between them
       dlog("plotting every %llu of %llu points out of %llu (%llu to %llu) for %d series in window size %f by %f\n",
@@ -153,7 +154,7 @@ HRESULT grapherApp::drawplots() {
                   if (min_coords[gr].y > next_coords.y) min_coords[gr].y = next_coords.y; }
                else { // drawing to this data point
                   plot_ww.target->DrawLine(prev_coords[gr], next_coords, pBlackBrush, 1.0f);
-                  if (DRAW_MINMAX && skip > 1 && pt > startpt) { // but first: draw vertical line between the points representing skipped points
+                  if (DRAW_MINMAX && skip > 1 && pt > startpt) { // but first: draw vertical line between the values representing skipped points
                      max_coords[gr].x = min_coords[gr].x = (prev_coords[gr].x + next_coords.x) / 2;
                      //dlog("drawing minmax line for pt %llu gr %d at %f from %f to %f, prev.y %f, next.y %f\n",
                      //       pt, gr, max_coords[gr].x, min_coords[gr].y, max_coords[gr].y, prev_coords[gr].y, next_coords.y);
@@ -169,7 +170,7 @@ HRESULT grapherApp::drawplots() {
             skip_mod = rand64() % skip;
          if (pt >= endpt) break;
          get_nextpoint(); };
-      draw_markers();
+      draw_plot_markers();
       hr = plot_ww.target->EndDraw();
       // ... all sorts of things that didn't work, in various combinations, to repaint the marker window:
       //SendMessage(marker_ww.handle, WM_CHILDACTIVATE, 0, 0);
@@ -210,6 +211,60 @@ void center_plot_on(double time) { // center the plot on "time"
       SetScrollInfo(plot_ww.handle, SB_HORZ, &si, true);
       RedrawWindow(plot_ww.handle, NULL, NULL, RDW_INVALIDATE | RDW_ERASE); } }
 
+//
+//      value popup window routines
+// Note that we use the old GDI routines, not D2D1 (Direct 2D), so we write directly to the screen
+
+#define VPOPUP_SIZE 150,40
+#define VPOPUP_CIRCLE_DIAM 10
+#define VPOPUP_CIRCLE_BOUND 16  // to allow for thickness; must be even
+static struct {  // private state information for the vpopup window
+   HDC memdc;
+   HGDIOBJ mbitmap, prevobject;
+   float xcoord, ycoord; } vpopup;
+
+void vpopup_open(float xcoord, float ycoord, float dataval, double pttime) {
+   assert(!vpopup_ww.initialized, "vpopup_already open");
+   dlog("creating vpopup at %f,%f for value %lf time %lf\n", xcoord, ycoord, dataval, pttime);
+   vpopup.xcoord = xcoord;
+   vpopup.ycoord = ycoord;
+   // (1) create popup window
+   vpopup_ww.handle =
+      CreateWindowEx(WS_EX_STATICEDGE, //WS_EX_CLIENTEDGE,
+                     "ClassVpopup", "Vpopup", WS_POPUP | /*WS_BORDER*/ WS_DLGFRAME,
+                     (int)xcoord, (int)ycoord - VPOPUP_CIRCLE_DIAM/2, VPOPUP_SIZE,
+                     /*plot_ww.handle*/ NULL, (HMENU)0, HINST_THISCOMPONENT, NULL);
+   ShowWindow(vpopup_ww.handle, SW_SHOW);
+   // (2) draw the text in it
+   HDC hdc = GetDC(vpopup_ww.handle);
+   RECT  rect = { 0, 0, VPOPUP_SIZE };
+   char msg[100], timestr[30];
+   snprintf(msg, sizeof(msg), "%f\nat %s", dataval, showtime(pttime, timestr, sizeof(timestr)));
+   DrawText(hdc, msg, -1, &rect, DT_NOCLIP | DT_CENTER);
+   // (3) save the screen area around the point in the plot window
+   HDC plothdc = GetDC(plot_ww.handle);
+   vpopup.memdc = CreateCompatibleDC(plothdc);
+   assert(vpopup.memdc, "CreateCompatibleDC failed");
+   vpopup.mbitmap = CreateCompatibleBitmap(plothdc, VPOPUP_CIRCLE_BOUND, VPOPUP_CIRCLE_BOUND);
+   assert(vpopup.mbitmap, "CreateCompatibleBitmap failed");
+   vpopup.prevobject = SelectObject(vpopup.memdc, vpopup.mbitmap);
+   assert(vpopup.prevobject, "vpopup_open SelectObject failed");
+   BOOL ok = BitBlt(vpopup.memdc, 0, 0, VPOPUP_CIRCLE_BOUND, VPOPUP_CIRCLE_BOUND, // destination, rectangle size
+                    plothdc, (int)xcoord - VPOPUP_CIRCLE_BOUND / 2, (int)ycoord - VPOPUP_CIRCLE_BOUND / 2, SRCCOPY);
+   dlog("vpopup_open: saved rectangle at %d, %d\n ",
+        (int)xcoord - VPOPUP_CIRCLE_BOUND / 2, (int)ycoord - VPOPUP_CIRCLE_BOUND / 2);
+   assert(ok, "Bitblt save err: %08lX\n", GetLastError());
+   dlog("vpopup_open: plothdc %08lX, memdc %08lX, mbitmap %08lX, prevobject %08lX\n",
+        plothdc, vpopup.memdc, vpopup.mbitmap, vpopup.prevobject);
+   // (4) draw a little circle at the actual spot
+   SelectObject(plothdc, GetStockObject(DC_PEN));
+   SetDCPenColor(plothdc, RGB(255, 0, 0));
+   ok = Ellipse(plothdc,
+                (int)xcoord - VPOPUP_CIRCLE_DIAM / 2, (int)ycoord - VPOPUP_CIRCLE_DIAM / 2,
+                (int)xcoord + VPOPUP_CIRCLE_DIAM / 2, (int)ycoord + VPOPUP_CIRCLE_DIAM / 2);
+   assert(ok, "vpopup_open: Ellpse failed");
+   vpopup_ww.initialized = true; }
+
 void vpopup_close(void) {
    TRACKMOUSEEVENT tme;  // cancel the hover timer
    tme.cbSize = sizeof(TRACKMOUSEEVENT);
@@ -218,7 +273,18 @@ void vpopup_close(void) {
    TrackMouseEvent(&tme);
    if (vpopup_ww.initialized) { // if there's really a popup window
       dlog("closing vpopup window\n");
-      //CloseWindow(vpopup_ww.handle);
+      HDC plothdc = GetDC(plot_ww.handle);
+      assert(plothdc, "vpopup_close getDC failed");
+      //SelectObject(vpopup.memdc, vpopup.mbitmap); // reselect the bitmap object
+      BOOL ok = BitBlt(plothdc, (int)vpopup.xcoord - VPOPUP_CIRCLE_BOUND / 2, (int)vpopup.ycoord - VPOPUP_CIRCLE_BOUND / 2, // destination
+                       VPOPUP_CIRCLE_BOUND, VPOPUP_CIRCLE_BOUND, // rectangle size
+                       vpopup.memdc, 0, 0, SRCCOPY);
+      dlog("vpopup_close: restored rectangle at %d, %d\n",
+           (int)vpopup.xcoord - VPOPUP_CIRCLE_BOUND / 2, (int)vpopup.ycoord - VPOPUP_CIRCLE_BOUND / 2);
+      assert(ok, "Bitblt restore err: %08lX\n", GetLastError());
+      HGDIOBJ object = SelectObject(vpopup.memdc, vpopup.prevobject);  // restore the previous object
+      assert(object, "vpopup_close SelectObject failed: %08lX", object);
+      DeleteDC(vpopup.memdc); // delete memory DC
       ShowWindow(vpopup_ww.handle, SW_HIDE);
       DestroyWindow(vpopup_ww.handle);
       vpopup_ww.handle = NULL;
@@ -235,12 +301,17 @@ bool check_mouseon_graph(int xPos, int yPos) { // has mouse moved onto a graph l
    float height = canvas.height;
    float width = canvas.width;
    float plotheight = height / plotdata.nseries;  // height of each plot
-   //dlog("check_mouseon_graph(%d, %d), canvas %f x %f, plotheight %f\n", xPos, yPos, width, height, plotheight);
+   dlog("check_mouseon_graph(%d, %d), canvas %f x %f, plotheight %f\n", xPos, yPos, width, height, plotheight);
    double pttime = plotdata.leftedge_time + (float(xPos) / width) * (plotdata.rightedge_time - plotdata.leftedge_time);
-   uint64_t samplenum = (uint64_t)((pttime - (double)plotdata.timestart_ns/1e9) / ((double)plotdata.timedelta_ns/1e9));
+   double delta_ns = (double)plotdata.timedelta_ns / 1e9;
+   uint64_t samplenum = (uint64_t)((pttime - (double)plotdata.timestart_ns/1e9 + delta_ns) / delta_ns); // rounded up
    //dlog("  samplenum %llu from pttime %f, timestart %f, timedelta %f\n",
    //       samplenum, pttime, (double)plotdata.timestart_ns / 1e9, (double)plotdata.timedelta_ns / 1e9);
-   assert(samplenum >= 0 && samplenum < plotdata.nvals, "check_mouseon_graph: bad samplenum %llu for time %f\n", samplenum, pttime);
+   assert(samplenum >= 0 && samplenum < plotdata.nvals, "check_mouseon_graph: bad #1 samplenum %llu for time %f\n", samplenum, pttime);
+   assert(samplenum >= plotdata.first_pt_plotted && samplenum <= plotdata.first_pt_plotted + plotdata.num_pts_plotted,
+          "check_mouseon_graph: bad #2 samplenum %llu for time %f\n", samplenum, pttime);
+   float x_coord = (float)(samplenum - plotdata.first_pt_plotted)/plotdata.num_pts_plotted * width;
+   dlog("   first pt %llu, samplenum %llu, width %f\n", plotdata.first_pt_plotted, samplenum, width);
    get_point(samplenum);
    int ptnum = (int)(samplenum - plotdata.curblk->firstnum); // which of the groups in the block, each with data for all the series
    for (int gr = 0; gr < plotdata.nseries; ++gr) { // for each plot series
@@ -257,28 +328,12 @@ bool check_mouseon_graph(int xPos, int yPos) { // has mouse moved onto a graph l
              "check_mouseon_graph: y coord %f too small at point %llu gr %d ptnum %d ndx %d value %f\n",
              y_coord, plotdata.curpt, gr, ptnum, ndx, dataval);
 #define MOUSE_FUZZ 10 // how close, in pixels, we need to be to the graph line
-      if (yPos > y_coord - MOUSE_FUZZ
-            && yPos < y_coord + MOUSE_FUZZ) {
-         dlog("creating vpopup for graph %d at %d,%d for value %lf time %lf\n", gr, xPos, yPos, dataval, pttime);
-         //ShowWindow(vpopup_ww.handle, SW_SHOWNORMAL);
-         //UpdateWindow(vpopup_ww.handle); //
-#define VPOPUP_SIZE 150,40
-         vpopup_ww.handle =
-            CreateWindowEx(WS_EX_STATICEDGE, //WS_EX_CLIENTEDGE,
-                           "ClassVpopup", "Vpopup", WS_POPUP | /*WS_BORDER*/ WS_DLGFRAME,
-                           xPos, yPos, VPOPUP_SIZE,
-                           /*plot_ww.handle*/ NULL, (HMENU)0, HINST_THISCOMPONENT, NULL);
-         ShowWindow(vpopup_ww.handle, SW_SHOW);
-         HDC hdc = GetDC(vpopup_ww.handle);
-         RECT  rect = {0, 0, VPOPUP_SIZE };
-         char msg[100], timestr[30];
-         snprintf(msg, sizeof(msg), "%f\nat %s", dataval, showtime(pttime, timestr, sizeof(timestr)));
-         DrawText(hdc, msg, -1, &rect, DT_NOCLIP | DT_CENTER);
-         vpopup_ww.initialized = true; } }
-#undef VPOPUP_SIZE
+      if (yPos > y_coord - MOUSE_FUZZ && yPos < y_coord + MOUSE_FUZZ) {
+         vpopup_open(x_coord, y_coord, dataval, pttime);
+         break; } }
    return vpopup_ww.initialized; }
 
-// voltage popup window: message processing
+// value popup window: message processing
 LRESULT CALLBACK grapherApp::WndProcVpopup(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
    LRESULT result = 0;
    show_message_name(&vpopup_ww, message, wParam, lParam);
