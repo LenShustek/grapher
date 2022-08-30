@@ -283,4 +283,30 @@ void copy_time(double time) { // copy a time as text to the Windows clipboard
    DU_MessageBoxTimeout(NULL, msg, "Info", 0, 2000);  // yes!
 }
 
+// get cpu time in seconds since the program started
+#include <processthreadsapi.h>
+double get_cpu_time(void) {
+   // Well, maybe not user state CPU time, since it doesn't include paging, I/O, etc.
+//  FILETIME a, b, c, d;
+//  if (GetProcessTimes(GetCurrentProcess(), &a, &b, &c, &d) != 0) {
+//     return  // total user time, not including kernal time
+//        (double)(d.dwLowDateTime |
+//                 ((unsigned long long)d.dwHighDateTime << 32)) * 0.0000001; }
+//  else  return 0;
+
+   // So let's try good old-fashioned wall clock time instead
+   static bool got_starttime = false;
+   static clock_t start_time;
+   if (!got_starttime) {
+      start_time = clock();
+      got_starttime = true; }
+   return double(clock() - start_time) / CLOCKS_PER_SEC; }
+
+statistics_t statistics;
+void show_statistics(void) {
+   char msg[500], numpts[30];
+   snprintf(msg, sizeof(msg),
+            "the last plot of %s points took %.0f msec", u64commas(statistics.last_plot_numpts, numpts), statistics.last_plot_time * 1000);
+   MessageBoxA(NULL, msg, "statistics", 0); }
+
 //*

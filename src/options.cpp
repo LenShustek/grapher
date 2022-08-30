@@ -124,7 +124,9 @@ LRESULT CALLBACK WndProcoptions(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
 
    case WM_INITDIALOG: {
       CheckDlgButton(hwnd, IDC_OPTIONS_DITHER,
-                     plotdata.do_dither ? BST_CHECKED : BST_UNCHECKED); }
+         plotdata.do_dither ? BST_CHECKED : BST_UNCHECKED); 
+      CheckDlgButton(hwnd, IDC_OPTIONS_STORE_INTS,
+         option_store_ints ? BST_CHECKED : BST_UNCHECKED); }
    break;
 
    case WM_COMMAND: {
@@ -136,6 +138,9 @@ LRESULT CALLBACK WndProcoptions(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
          UINT result = IsDlgButtonChecked(hwnd, IDC_OPTIONS_DITHER);
          if (result == BST_CHECKED) plotdata.do_dither = TRUE;
          if (result == BST_UNCHECKED) plotdata.do_dither = FALSE;
+         result = IsDlgButtonChecked(hwnd, IDC_OPTIONS_STORE_INTS);
+         if (result == BST_CHECKED) option_store_ints = TRUE;
+         if (result == BST_UNCHECKED) option_store_ints = FALSE;
          goto close_options; }
       break;
 

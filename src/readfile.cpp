@@ -56,9 +56,9 @@ void progressbar_hide(void) {
 
 struct datablk_t * alloc_data(void) { // add another data block
    struct datablk_t *newblk;
-   int blksize = sizeof(struct datablk_t) // header as declared holds only one value
-                 + plotdata.nseries * sizeof(float) * NDATABLK;
-   assert(newblk = (struct datablk_t *)malloc(blksize), "can't allocate data block");
+   int blksize = sizeof(struct datablk_t) // header as declared holds only 4 bytes of values
+                 + plotdata.nseries * BLKDATASIZE;   // (could be (BLKDATASIZE-4), but we leave a buffer)
+   assert(newblk = (struct datablk_t *)malloc(blksize), "can't allocate data block for block number %d", plotdata.numblks+1);
    ++plotdata.numblks;
    newblk->next = newblk->prev = NULL;
    newblk->count = 0;
@@ -73,15 +73,26 @@ struct datablk_t * alloc_data(void) { // add another data block
    plotdata.datatail = newblk;
    return newblk; }
 
-void add_data(float *datapoints) {  // add plotdata.nseries values
+void add_float_data(float *datapoints) {  // add plotdata.nseries floating point values
    struct datablk_t *blk;
    if (plotdata.datahead== NULL  // if we haven't allocated anything yet
-         || plotdata.datatail->count == NDATABLK) // or if the last block is full,
+         || plotdata.datatail->count == BLKDATASIZE/sizeof(float)) // or if the last block is full,
       blk = alloc_data(); // then allocate another data block
    else blk = plotdata.datatail; // otherwise continue filling the last block
-   int startpos = blk->count * plotdata.nseries; // add after all the previous data
+   int startpos = blk->count * plotdata.nseries; // add new data after all the previous data
    for (int ndx = 0; ndx < plotdata.nseries; ++ndx)  // add the new values
-      blk->data[startpos+ndx] = datapoints[ndx];  // (would memcpy() be faster?)
+      blk->u.fdata[startpos+ndx] = datapoints[ndx];  // (would memcpy() be faster?)
+   ++blk->count; }
+
+void add_int_data(int16_t *datapoints) {  // add plotdata.nseries short integer values
+   struct datablk_t *blk;
+   if (plotdata.datahead == NULL  // if we haven't allocated anything yet
+         || plotdata.datatail->count == BLKDATASIZE/sizeof(uint16_t)) // or if the last block is full,
+      blk = alloc_data(); // then allocate another data block
+   else blk = plotdata.datatail; // otherwise continue filling the last block
+   int startpos = blk->count * plotdata.nseries; // add new data after all the previous data
+   for (int ndx = 0; ndx < plotdata.nseries; ++ndx)  // add the new values
+      blk->u.idata[startpos + ndx] = datapoints[ndx];  // (would memcpy() be faster?)
    ++blk->count; }
 
 void dump_blocks(void) {
@@ -107,12 +118,14 @@ void show_file_info(void) {
    snprintf(msg, sizeof(msg),
             "The %s file had %s points for each of %d plots.\n"
             "%s" // sampling info
-            "We allocated %s data blocks taking %s in virtual memory.\n"
+            "We allocated %s data blocks with %s,\n"
+            "   which takes %s in virtual memory.\n"
             "The largest value from time %f to %f is %.3f.\n",
             format_memsize(filesize, filemsg), u64commas(file_nvals, nfilevals), plotdata.nseries,
             sample_info,
             u32commas(plotdata.numblks, numblks),
-            /**/format_memsize(plotdata.numblks*(uint64_t)(sizeof(struct datablk_t)+ plotdata.nseries * NDATABLK*sizeof(float)), memmsg),
+            plotdata.store_ints ? "2-byte scaled integers" : "4-byte floats",
+            format_memsize(plotdata.numblks*(uint64_t)(sizeof(struct datablk_t)+ plotdata.nseries * BLKDATASIZE), memmsg),
             plotdata.timestart, plotdata.timeend, plotdata.maxval);
    MessageBoxA(NULL, msg, "Info", 0); }
 
@@ -174,6 +187,7 @@ void discard_data(void) {
    plotdata.numblks = 0;
    plotdata.nvals = file_nvals = 0;
    plotdata.maxval = 0.0f;
+   plotdata.store_ints = option_store_ints;
    SendMessage(label_ww.handle, WM_ERASEBKGND, (WPARAM)GetDC(label_ww.handle), 0);
    SendMessage(plot_ww.handle, WM_ERASEBKGND, (WPARAM)GetDC(plot_ww.handle), 0);
    SendMessage(marker_ww.handle, WM_ERASEBKGND, (WPARAM)GetDC(marker_ww.handle), 0);
@@ -186,6 +200,42 @@ void discard_data(void) {
    EnableMenuItem(menu, ID_TOOLS_GOTO, MF_BYCOMMAND | MF_GRAYED);
    SetWindowText(main_ww.handle, "grapher"); // put the application name on the title of the main window
 }
+
+// Convert 4-byte floating point data read from a .csv file into 2-byte scaled signed integers.
+// We can only do that after all the data has been read and stored, so we know the maximum value.
+// The data is reduced in size by half, so we can condense in place and use only the first half
+// of the data blocks we allocated, which presumably are contiguous in virtual memory. The second
+// half of the blocks are then released.
+
+void convert_float_to_int(void) {
+   //dump_blocks();
+   struct datablk_t *srcblk = plotdata.datahead;
+   struct datablk_t *dstblk = plotdata.datahead;
+   plotdata.numblks = 1;  // start over counting the number of blocks
+   int dstndx = 0, dstcnt = 0;
+   while (1) { // for all source blocks
+      int srcndx = 0;
+      while (srcblk->count--) {  // convert a whole source block's data
+         for (int gr = 0; gr < plotdata.nseries; ++gr) { // for each plot series
+            float fdata = srcblk->u.fdata[srcndx++];
+            dstblk->u.idata[dstndx++] = (uint16_t)(fdata/plotdata.maxval * 32767 + (fdata < 0 ? -.5 : +.5)); }
+         ++dstcnt; }
+      srcblk = srcblk->next; // move to the next source block
+      if (srcblk == NULL) break;  // no more source blocks, so exit
+      if (dstcnt >= BLKDATASIZE/sizeof(int16_t)) { // finished a destination block
+         ++plotdata.numblks;
+         dstblk->count = dstcnt;
+         dstblk->firstnum *= 2;  // the starting point number in the block is twice what it was before
+         dstblk = dstblk->next;
+         dstndx = dstcnt = 0; } }
+   dstblk->count = dstcnt; // tidy up the last destination block
+   dstblk->firstnum *= 2;
+   struct datablk_t *freeblk = dstblk->next; // where to start freeing all blocks after that
+   dstblk->next = NULL; // end the chain
+   while (freeblk) {
+      struct datablk_t *nextblk = freeblk->next;
+      free(freeblk);
+      freeblk = nextblk; } }
 
 void make_fake_data(void) {  // make fake data: 2 sine waves, one increasing, one decreasing
    int ncycles = 100;
@@ -200,12 +250,17 @@ void make_fake_data(void) {  // make fake data: 2 sine waves, one increasing, on
    plotdata.nvals = file_nvals = npts;
    strcpy(plotdata.labels[0], "fake data 1");
    strcpy(plotdata.labels[1], "fake data 2");
-   float series[2];
+   float fseries[2];
+   int16_t iseries[2];
    for (int pt = 0; pt < npts; ++pt) {
       float sinx = (float)sin((2 * 3.141592f*(float)pt * (float)ncycles) / (float)npts); // actual sine wave value
-      series[0] = sinx * pt / npts;         // gradually increasing sine wave
-      series[1] = sinx * (npts-pt) / npts;  // gradually decreasing sine wave
-      add_data(series); }
+      fseries[0] = sinx * pt / npts;         // gradually increasing sine wave
+      fseries[1] = sinx * (npts-pt) / npts;  // gradually decreasing sine wave
+      if (plotdata.store_ints) {  // either store as scaled integers
+         iseries[0] = (uint16_t)(fseries[0] * 32767 + (fseries[0] < 0 ? -.5 : +.5));
+         iseries[1] = (uint16_t)(fseries[1] * 32767 + (fseries[1] < 0 ? -.5 : +.5));
+         add_int_data(iseries); }
+      else add_float_data(fseries); } // or store as floating point
    finish_file("fake data"); }
 
 void get_filesize(void) {
@@ -244,7 +299,6 @@ void read_tbin_file(char *filename) {
    for (int trk = 0; trk < plotdata.nseries; ++trk)
       snprintf(plotdata.labels[trk], MAXLABEL, "track %d", trk);
    int16_t tbin_voltages[MAXSERIES];
-   float datapoints[MAXSERIES];
    //uint64_t timenow = plotdata.timestart_ns;
    HCURSOR hourglass = LoadCursor(NULL, IDC_WAIT);
    SetCursor(hourglass);
@@ -258,9 +312,13 @@ void read_tbin_file(char *filename) {
                 "can't read .tbin data for heads 1.. ");
          nbytes += plotdata.nseries * 2;
          ++file_nvals; }
-      for (int series = 0; series < plotdata.nseries; ++series) { // convert from tbin binary to float
-         datapoints[series] = (float)tbin_voltages[series] / 32767 * tbin_hdr.u.s.maxvolts; }
-      add_data(datapoints);
+      if (plotdata.store_ints)  // store scaled signed integers without conversion
+         add_int_data(tbin_voltages);
+      else { // convert and store floating-point values
+         float fdatapoints[MAXSERIES];
+         for (int series = 0; series < plotdata.nseries; ++series) { // convert from tbin binary to float
+            fdatapoints[series] = (float)tbin_voltages[series] / 32767 * tbin_hdr.u.s.maxvolts; }
+         add_float_data(fdatapoints); }
       //timenow += plotdata.timedelta_ns;
       if (filesize > 10000000L)
          progressbar_show((int)(nbytes * 100 / filesize)); }
@@ -323,11 +381,12 @@ void read_csv_file(char *filename) {
                if (datapoint < 0) {
                   if (-datapoint > plotdata.maxval) plotdata.maxval = -datapoint; }
                else if (datapoint > plotdata.maxval) plotdata.maxval = datapoint; }
-            add_data(datapoints); // add nseries data points
+            add_float_data(datapoints); // add nseries data points
             ++plotdata.nvals;
             if (filesize > 10000000L)
                progressbar_show((int)(nbytes * 100 / filesize)); } }
       progressbar_hide();
+      if (plotdata.store_ints) convert_float_to_int();
       finish_file(filename); }
    else MessageBoxA(NULL, _strerror(NULL), "Error", 0); // can't open file
 }
@@ -388,9 +447,12 @@ void write_csv_file(uint64_t starttime, uint64_t lastpt) {
       // should write fast special-purpose routines, as we did for parsing floating-point input. Could be 10x faster!
       fprintf(outf, "%12.8lf, ", (double)timenow / 1e9); // the timestamp column
       timenow += plotdata.timedelta_ns;
-      for (int gr = 0; gr < plotdata.nseries; ++gr) // all the data columns
-         fprintf(outf, "%f%s", plotdata.curblk->data[plotdata.curndx+gr],
-                 gr == plotdata.nseries - 1 ? "\n" : ", ");
+      for (int gr = 0; gr < plotdata.nseries; ++gr) { // all the data columns
+         float fdata;
+         if (plotdata.store_ints)  // convert scaled signed integer to float
+            fdata = (float)plotdata.curblk->u.idata[plotdata.curndx + gr] / 32767 * plotdata.maxval;
+         else fdata = plotdata.curblk->u.fdata[plotdata.curndx + gr];
+         fprintf(outf, "%f%s", fdata, gr == plotdata.nseries - 1 ? "\n" : ", "); }
       if (numpts > 1000000UL)
          progressbar_show((int)((pnt - firstpt) * 100 / numpts));
       ++pnt;
@@ -430,22 +492,25 @@ void write_tbin_file(uint64_t starttime, uint64_t lastpt) {
    assert(fwrite(&tbin_dat, sizeof(tbin_dat), 1, outf) == 1, "can't write tbin data header: %s", _strerror(NULL));
    HCURSOR hourglass = LoadCursor(NULL, IDC_WAIT);
    SetCursor(hourglass);
-   float fsample, round;  // this conversion code was cribbed from csvtbin.c
-   int32_t sample;
    long long count_toosmall = 0, count_toobig = 0;
    do { // for all data points
       int16_t outbuf[MAXSERIES]; // accumulate data for all graphs, for faster writing
       for (int gr = 0; gr < plotdata.nseries; ++gr) { // for all plots at that datapoint
-         fsample = plotdata.curblk->data[plotdata.curndx + gr];
-         if (fsample < 0) round = -0.5;  else round = 0.5;  // (int) truncates towards zero
-         sample = (int)((fsample / tbin_hdr.u.s.maxvolts * 32767) + round);
-         //dlog("%6d %9.5f, ", sample, fsample);
-         if (sample < -32767) {
-            sample = -32767; ++count_toosmall; }
-         if (sample > 32767) {
-            dlog("too big at pt %llu, sample %d\n", pnt, sample);
-            sample = 32767;  ++count_toobig; }
-         outbuf[gr] = (int16_t)sample; }
+         if (plotdata.store_ints)  // already in scaled signed integer format
+            outbuf[gr] = plotdata.curblk->u.idata[plotdata.curndx + gr];
+         else {  // convert from float to scaled signed integer
+            float fsample, round;  // this conversion code was cribbed from csvtbin.c
+            int32_t sample;
+            fsample = plotdata.curblk->u.fdata[plotdata.curndx + gr];
+            if (fsample < 0) round = -0.5;  else round = 0.5;  // (int) truncates towards zero
+            sample = (int)((fsample / tbin_hdr.u.s.maxvolts * 32767) + round);
+            //dlog("%6d %9.5f, ", sample, fsample);
+            if (sample < -32767) {
+               sample = -32767; ++count_toosmall; }
+            if (sample > 32767) {
+               dlog("too big at pt %llu, sample %d\n", pnt, sample);
+               sample = 32767;  ++count_toobig; }
+            outbuf[gr] = (int16_t)sample; } }
       assert(fwrite(outbuf, 2, plotdata.nseries, outf) == plotdata.nseries,
              "can't write tbin data: %s", _strerror(NULL));
       if (numpts > 10000000UL)

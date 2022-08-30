@@ -62,7 +62,7 @@ int64_t get_skip_increment(int64_t skipval) {
 #endif
 
 // This works somewhat for eliminating Moire effects, but not at all magnfications
-uint64_t rand64() { // generate a 64-bit random number
+static inline uint64_t rand64() { // generate a 64-bit random number
 // George Marsaglia's algorithm: https://en.wikipedia.org/wiki/Xorshift
    static uint64_t state = 12345;
    uint64_t x = state;
@@ -135,13 +135,16 @@ HRESULT grapherApp::drawplots() {
       if (numpts > 5000000) { // if this is going to take a while
          HCURSOR hourglass = LoadCursor(NULL, IDC_WAIT);
          SetCursor(hourglass); }
-      for (uint64_t pt = startpt; ; ++pt) { // **** for all the points: BE EFFICIENT HERE!
+      double start_cpu_time = get_cpu_time();
+      for (uint64_t pt = startpt; ; ++pt) { // ***** for all the points: BE EFFICIENT HERE! *****
          D2D1_POINT_2F next_coords;
          next_coords.x = width * (float)(pt - startpt) / numpts;
          bool plot_this_point = (pt - startpt) % skip == skip_mod;
          if (DRAW_MINMAX || plot_this_point)  // if we're looking at this point
             for (int gr = 0; gr < plotdata.nseries; ++gr) { // for each plot series
-               float dataval = plotdata.curblk->data[plotdata.curndx + gr]; // -plotdata.maxval .. +plotdata.maxval
+               float dataval = plotdata.store_ints ?
+                               (float)plotdata.curblk->u.idata[plotdata.curndx + gr] / 32767 * plotdata.maxval
+                               : dataval = plotdata.curblk->u.fdata[plotdata.curndx + gr];
                //assert(dataval <= plotdata.maxval, "data value %f bigger than max %f\n", dataval, plotdata.maxval);
                float midy = plotheight * gr + plotheight_div_2;
                next_coords.y = midy - plotheight_div_2 * dataval / plotdata.maxval;
@@ -170,6 +173,8 @@ HRESULT grapherApp::drawplots() {
             skip_mod = rand64() % skip;
          if (pt >= endpt) break;
          get_nextpoint(); };
+      statistics.last_plot_numpts = numpts;
+      statistics.last_plot_time = get_cpu_time() - start_cpu_time;
       draw_plot_markers();
       hr = plot_ww.target->EndDraw();
       // ... all sorts of things that didn't work, in various combinations, to repaint the marker window:
@@ -317,19 +322,22 @@ bool check_mouseon_graph(int xPos, int yPos) { // has mouse moved onto a graph l
    for (int gr = 0; gr < plotdata.nseries; ++gr) { // for each plot series
       int ndx = ptnum * plotdata.nseries /* get to the right group */ + gr /* then to the value for this plot */;
       //dlog("  pttim %f, samplenum %llu, blk starts at %llu, ptnum %d ndx %d\n", pttime, samplenum, plotdata.curblk->firstnum, ptnum, ndx);
-      assert(ndx >= 0 && ndx < NDATABLK * plotdata.nseries,
-             "check_mouseon_graph: bad ndx %d to data\n", ndx);
-      float dataval = plotdata.curblk->data[ndx]; // -plotdata.maxval .. +plotdata.maxval
-      assert(dataval <= plotdata.maxval, "check_mouseon_graph: data value %f bigger than max %f\n", dataval, plotdata.maxval);
-      float midy = plotheight * gr + plotheight / 2;
-      float y_coord = midy - plotheight / 2 * dataval / plotdata.maxval; // where the point was plotted
-      //dlog("  plot %d dataval %f of max %f plotted at y %f, centerline %f\n", gr, dataval, plotdata.maxval, y_coord, midy);
-      assert(y_coord >= midy - plotheight / 2,
-             "check_mouseon_graph: y coord %f too small at point %llu gr %d ptnum %d ndx %d value %f\n",
-             y_coord, plotdata.curpt, gr, ptnum, ndx, dataval);
+      assert(ndx >= 0 && ndx <
+             BLKDATASIZE / (plotdata.store_ints ? sizeof(int16_t) : sizeof(float)) * plotdata.nseries,
+              "check_mouseon_graph: bad ndx %d to data\n", ndx);
+             float dataval = plotdata.store_ints ?
+                             (float)plotdata.curblk->u.idata[ndx] / 32767 * plotdata.maxval
+                             : dataval = plotdata.curblk->u.fdata[ndx]; // -plotdata.maxval .. +plotdata.maxval
+             assert(dataval <= plotdata.maxval, "check_mouseon_graph: data value %f bigger than max %f\n", dataval, plotdata.maxval);
+             float midy = plotheight * gr + plotheight / 2;
+             float y_coord = midy - plotheight / 2 * dataval / plotdata.maxval; // where the point was plotted
+             //dlog("  plot %d dataval %f of max %f plotted at y %f, centerline %f\n", gr, dataval, plotdata.maxval, y_coord, midy);
+             assert(y_coord >= midy - plotheight / 2,
+                    "check_mouseon_graph: y coord %f too small at point %llu gr %d ptnum %d ndx %d value %f\n",
+                    y_coord, plotdata.curpt, gr, ptnum, ndx, dataval);
 #define MOUSE_FUZZ 10 // how close, in pixels, we need to be to the graph line
       if (yPos > y_coord - MOUSE_FUZZ && yPos < y_coord + MOUSE_FUZZ) {
-         vpopup_open(x_coord, y_coord, dataval, pttime);
+      vpopup_open(x_coord, y_coord, dataval, pttime);
          break; } }
    return vpopup_ww.initialized; }
 

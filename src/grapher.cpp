@@ -43,13 +43,14 @@ markers:    Place a marker on the plot by clicking the marker number, moving the
 copy time:  Right clicking a marker's displayed time or delta time, or right clicking
             anywhere in the plot window, copies the time to the Windows clipboard.
 
-tools/goto:
-            Centers the plot on a specified time, and puts time marker 9 there.
+tools/goto: Center the plot on a specified time, and puts time marker 9 there.
 
 tools/options
-            dither sampled points: Randomly choose the point to draw a line to when we're
-            skpping points closer together than the screen resolution. This somewhat reduces
-            the Moire effect when zoomed out on a periodic waveform, but not entirely.
+         'dither sampled points': Randomly choose the point to draw a line to when we're
+             skipping points closer together than the screen resolution. This somewhat reduces
+             the Moire effect when zoomed out on a periodic waveform, but not entirely.
+         'store 16-bit integers': Store scaled signed 2-byte integers instead of 4-byte floats.
+             This saves on virtual memory but, mysteriously, doesn't make plotting faster.
 
 File/Save.tbin or File/Save.csv:
            The data between markers 1 and 2 is saved into a new file of the specified format.
@@ -58,7 +59,7 @@ File/Save.tbin or File/Save.csv:
 This is unabashedly a windows-only program for a little-endian 64-bit CPU with lots of virtual memory.
 
 Len Shustek
-July 2022
+July 2022, Aug 2022
 *******************************************************************************************************
 ---CHANGE LOG ---
  8 Jul 2022, L. Shustek, V0.1
@@ -89,9 +90,14 @@ July 2022
 - have the marker window use a narrow fixed-width font so columns line up
 - make right-click on the marker delta copy the delta, not the marker's time
 - don't allow sampling to be set to 0
+
+30 Aug 2022, L. Shustek, V0.5
+- add "tools/show statistics" to show how long plots take; maybe add more later.
+- add "tools/options/store 16-bit integers" in an attempt to make plotting even
+    faster -- but it doesn't! See comments below.
  */
 
-#define VERSION "0.4"
+#define VERSION "0.5"
 
 /* possible TODOs:
 - recent file list, but where to store them?
@@ -122,6 +128,33 @@ TODOs done
 - show plot names in the left window
 - grey out inappropriate file menu items
 
+- I implemented an experiment to see if plotting could be made even faster by
+  using .tbin-like 16-bit scaled signed integers for the data instead of 4-byte floats.
+  That halves the amount of virtual memory we use, and so I expected much less paging.
+  It should far offset the small extra time to convert 2-byte ints to floats
+  when the plotting happens.
+
+  But that is not the case!  See these numbers:
+     file f403-01-t4_try2.tbin, 66,012,464 points
+        2-byte ints, 2201 data blocks, 293.9 MB
+          initial plot: 94 msec
+          zoom out so right is 32.88: 255 msec
+          zoom out full: 676 msec
+        4-byte floats, 4401 data blocks, 587.7 MB
+          initial plot: 88 msec
+          zoom out so right is 32.88: 211 msec
+          zoom out full: 561 msec
+     file kronos.tbin, 253,937,712 points
+        2-byte ints, 8465 data blocks, 1.1 GB
+          initial plot: 93 msec
+          zoom out full: 2427 msec
+        4-byte floats, 16,930 data blocks, 2.2 GB
+          initial plot: 92 msec
+          zoom out full: 1959 msec
+
+ The floating point version is faster, and I don't know why. Maybe there's 
+ something odd going on with virtual memory paging. I've left the code in,
+ but "tools/options/store 16-bit integers" is turned off by default.
 */
 /******************************************************************************
 Copyright (C) 2022 Len Shustek
@@ -140,7 +173,7 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-******************************************************************************/
+***************************************************************************** */
 
 #include "grapher.h"
 
@@ -154,6 +187,9 @@ ID2D1Factory *pD2DFactory;
 //IDWriteTextFormat *m_pTextFormat;
 ID2D1SolidColorBrush *pBlackBrush, *pRedBrush;
 IDWriteTextFormat *pTextFormat;
+
+bool option_store_ints;  // need this separate from plotdata.store_ints
+// so that changing the option doesn't invalidate the current file data.
 
 struct window_t
    main_ww = { "main_ww", 0 },  // the main application window, of which the rest are children
@@ -315,6 +351,7 @@ HRESULT grapherApp::Initialize() {
             this ); // context
       dlog("created main window handle %llX\n", (uint64_t) main_ww.handle);
       plotdata.do_dither = DEFAULT_DITHER;
+      option_store_ints = DEFAULT_STORE_INTS;
       app = this;
       hr = main_ww.handle ? S_OK : E_FAIL;
       if (SUCCEEDED(hr)) {
@@ -455,6 +492,9 @@ LRESULT CALLBACK grapherApp::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPA
                break;
             case ID_TOOLS_OPTIONS:
                set_tools_options();
+               break;
+            case ID_TOOLS_SHOWSTATISTICS:
+               show_statistics();
                break;
             case ID_FILE_OPEN:
                open_file(hwnd);

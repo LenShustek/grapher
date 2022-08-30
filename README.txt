@@ -40,19 +40,20 @@ markers:    Place a marker on the plot by clicking the marker number, moving the
 copy time:  Right clicking a marker's displayed time or delta time, or right clicking
             anywhere in the plot window, copies the time to the Windows clipboard.
 
-tools/goto:
-            Centers the plot on a specified time, and puts time marker 9 there.
+tools/goto: Center the plot on a specified time, and puts time marker 9 there.
 
 tools/options
-            dither sampled points: Randomly choose the point to draw a line to when we're
-            skpping points closer together than the screen resolution. This somewhat reduces
-            the Moire effect when zoomed out on a periodic waveform, but not entirely.
+         'dither sampled points': Randomly choose the point to draw a line to when we're
+             skipping points closer together than the screen resolution. This somewhat reduces
+             the Moire effect when zoomed out on a periodic waveform, but not entirely.
+         'store 16-bit integers': Store scaled signed 2-byte integers instead of 4-byte floats.
+             This saves on virtual memory but, mysteriously, doesn't make plotting faster.
 
 File/Save.tbin or File/Save.csv:
            The data between markers 1 and 2 is saved into a new file of the specified format.
            If saving .tbin and the data came from a .tbin file, the original header is used.
-           
+
 This is unabashedly a windows-only program for a little-endian 64-bit CPU with lots of virtual memory.
 
 Len Shustek
-July 2022
+July 2022, Aug 2022
